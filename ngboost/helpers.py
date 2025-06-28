@@ -1,4 +1,4 @@
-import numpy as np
+import jax.numpy as np
 from sklearn.utils import check_array
 
 

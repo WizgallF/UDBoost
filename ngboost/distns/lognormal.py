@@ -1,7 +1,7 @@
 """The NGBoost LogNormal distribution and scores"""
-import numpy as np
-import scipy as sp
-from scipy.stats import lognorm as dist
+import jax.numpy as np
+import jax.scipy as sp
+from jax.scipy.stats import lognorm as dist
 
 from ngboost.distns.distn import RegressionDistn
 from ngboost.scores import CRPScore, LogScore
