@@ -1,7 +1,14 @@
 "The NGBoost library API"
 # pylint: disable=too-many-arguments
+
+# SKlearn
 from sklearn.base import BaseEstimator
 from sklearn.utils import check_array
+from sklearn.utils import resample
+
+# Numpy
+import numpy as np
+
 
 from ngboost.distns import (
     Bernoulli,
@@ -327,3 +334,144 @@ class NGBSurvival(NGBoost, BaseEstimator):
             Y_val=Y_from_censored(T_val, E_val),
             **kwargs,
         )
+
+
+
+class NGBEnsembleRegressor(NGBoost, BaseEstimator):
+    """
+    Constructor for NGBoost ensemble regression models.
+
+    NGBEnsembleRegressor is a wrapper for the generic NGBoost class that facilitates an ensemble of NGBoost models for regression.
+    Use this class if you want to predict an outcome that could take an
+    infinite number of (ordered) values using an ensemble of NGBoost models.
+
+    Parameters:
+        Dist              : assumed distributional form of Y|X=x.
+                            A distribution from ngboost.distns, e.g. Normal
+        Score             : rule to compare probabilistic predictions P̂ to the observed data y.
+                            A score from ngboost.scores, e.g. LogScore
+        Base              : base learner to use in the boosting algorithm.
+                            Any instantiated sklearn regressor, e.g. DecisionTreeRegressor()
+        natural_gradient  : logical flag indicating whether the natural gradient should be used
+        n_estimators      : the number of boosting iterations to fit
+        learning_rate     : the learning rate
+        minibatch_frac    : the percent subsample of rows to use in each boosting iteration
+        col_sample        : the percent subsample of columns to use in each boosting iteration
+        verbose           : flag indicating whether output should be printed during fitting
+        verbose_eval      : increment (in boosting iterations) at which output should be printed
+        tol               : numerical tolerance to be used in optimization
+        random_state      : seed for reproducibility. See
+                            https://stackoverflow.com/questions/28064634/random-state-pseudo-random-number-in-scikit-learn
+        validation_fraction: Proportion of training data to set
+                             aside as validation data for early stopping.
+        early_stopping_rounds:      The number of consecutive boosting iterations during which the
+                                    loss has to increase before the algorithm stops early.
+                                    Set to None to disable early stopping and validation.
+                                    None enables running over the full data set.
+        n_regressors    : the number of NGBoost regressors to fit in the ensemble
+        ensemble_method : the method create the ensemble, options are
+                            'bagging' Creating an ensemble by fitting
+                                             each regressor on a different bootstrap sample of the data
+
+    Output:
+        An NGBRegressor object that can be fit.
+    """
+    # pylint: disable=too-many-positional-arguments
+    def __init__(
+        self,
+        Dist=Normal,
+        Score=LogScore,
+        Base=default_tree_learner,
+        natural_gradient=True,
+        n_estimators=500,
+        learning_rate=0.01,
+        minibatch_frac=1.0,
+        col_sample=1.0,
+        verbose=True,
+        verbose_eval=100,
+        tol=1e-4,
+        random_state=None,
+        validation_fraction=0.1,
+        early_stopping_rounds=None,
+        n_regressors=10,
+        ensemble_method="bagging",
+        ):
+            assert issubclass(
+                Dist, RegressionDistn
+            ), f"{Dist.__name__} is not useable for regression."
+
+            if not hasattr(
+                Dist, "scores"
+            ):  # user is trying to use a dist that only has censored scores implemented
+                Dist = Dist.uncensor(Score)
+
+            super().__init__(
+                Dist,
+                Score,
+                Base,
+                natural_gradient,
+                n_estimators,
+                learning_rate,
+                minibatch_frac,
+                col_sample,
+                verbose,
+                verbose_eval,
+                tol,
+                random_state,
+                validation_fraction,
+                early_stopping_rounds,
+            )
+
+            self._estimator_type = "regressor"
+            self.n_regressors = n_regressors
+            self.ensemble_method = ensemble_method
+            self.models = []
+
+    def fit(self, X, y, **kwargs):
+        """
+        Fits an NGBoost ensemble regressor to the data.
+        For additional parameters see ngboost.NGboost.fit
+
+        Parameters:
+            X : DataFrame object or List or numpy array of predictors (n x p) in Numeric format
+            y : DataFrame object or List or numpy array of target values (n) in Numeric format
+
+        Output:
+            self : returns a list of fitted NGBRegressor models
+        """
+        if self.ensemble_method == "bagging":
+            for i in range(self.n_regressors):
+                X_subsample, y_subsample = resample(X, y, replace=True, n_samples=int(0.8 * len(X)), random_state=i) # Make the subsampling size a parameter?
+                model = NGBRegressor(
+                    Dist=self.Dist,
+                    Score=self.Score,
+                    Base=self.Base,
+                    natural_gradient=self.natural_gradient,
+                    n_estimators=self.n_estimators,
+                    learning_rate=self.learning_rate,
+                    minibatch_frac=self.minibatch_frac,
+                    col_sample=self.col_sample,
+                    verbose=self.verbose,
+                    verbose_eval=self.verbose_eval,
+                    tol=self.tol,
+                    random_state=self.random_state,
+                )
+                model.fit(X_subsample, y_subsample, **kwargs)
+                self.models.append(model)
+        else:
+            raise ValueError(f"Ensemble method {self.ensemble_method} not supported. Use 'bagging'.")
+        return self
+    
+    def predict(self, X):
+        """
+        Predicts the target values for the input data X using the ensemble of NGBoost models.
+        For additional parameters see ngboost.NGboost.predict
+        Parameters:
+            X : DataFrame object or List or numpy array of predictors (n x p) in Numeric format
+
+        Output:
+            Numpy array of predicted target values (n)
+        """
+        predictions = [model.predict(X) for model in self.models]
+        return np.mean(predictions, axis=0)
+    
