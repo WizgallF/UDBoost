@@ -8,6 +8,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 import numpy as np
 import pandas as pd
+from ngboost.distns import Normal, NormalInverseGamma
 #Load Boston housing dataset
 data_url = "http://lib.stat.cmu.edu/datasets/boston"
 raw_df = pd.read_csv(data_url, sep=r"\s+", skiprows=22, header=None)
@@ -16,7 +17,7 @@ Y = raw_df.values[1::2, 2]
 
 X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2)
 
-ngb = NGBRegressor().fit(X_train, Y_train)
+ngb = NGBRegressor(Dist=NormalInverseGamma).fit(X_train, Y_train)
 Y_preds = ngb.predict(X_test)
 Y_dists = ngb.pred_dist(X_test)
 
