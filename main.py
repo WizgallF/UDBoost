@@ -6,18 +6,29 @@ import os
 from ngboost import NGBRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
+from sklearn.datasets import load_diabetes
 import numpy as np
 import pandas as pd
-from ngboost.distns import Normal, NormalInverseGamma
+from ngboost.distns import Normal, NormalInverseGamma, NIGLogScore
 #Load Boston housing dataset
-data_url = "http://lib.stat.cmu.edu/datasets/boston"
-raw_df = pd.read_csv(data_url, sep=r"\s+", skiprows=22, header=None)
-X = np.hstack([raw_df.values[::2, :], raw_df.values[1::2, :2]])
-Y = raw_df.values[1::2, 2]
+#data_url = "http://lib.stat.cmu.edu/datasets/boston"
+#raw_df = pd.read_csv(data_url, sep=r"\s+", skiprows=22, header=None)
+#X = np.hstack([raw_df.values[::2, :], raw_df.values[1::2, :2]])
+#Y = raw_df.values[1::2, 2]
+# Standardize y and call the corresponding variable z
+X, y = load_diabetes(return_X_y=True, as_frame=True)
+z = (y - y.mean()) / y.std()
 
-X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2)
+X_train, X_test, Y_train, Y_test = train_test_split(X, z, test_size=0.2)
 
-ngb = NGBRegressor(Dist=NormalInverseGamma).fit(X_train, Y_train)
+ngb = NGBRegressor(
+    Dist=NormalInverseGamma,
+    Score=NIGLogScore,
+    n_estimators=500,
+    learning_rate=0.01, 
+    verbose=True,
+    natural_gradient=True,
+    ).fit(X_train, Y_train)
 Y_preds = ngb.predict(X_test)
 Y_dists = ngb.pred_dist(X_test)
 
