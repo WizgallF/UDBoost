@@ -26,7 +26,17 @@ X_train, X_test, Y_train, Y_test = train_test_split(X, z, test_size=0.2)
 # Fit the ensemble regressor
 ngb_ensemble = NGBEnsembleRegressor(n_regressors=10)
 ngb_ensemble.fit(X_train, Y_train)
-y_pred_ensemble = ngb_ensemble.predict(X_test)
+y_pred_ensemble = ngb_ensemble.predict(X_test, average=False)
+print("Ensemble Regressor Predictions Shape:", y_pred_ensemble.shape)
+# Get raw predictions from each regressor in the ensemble
+y_pred_all = ngb_ensemble.predict(X_test, average=False)  # shape: (n_samples, n_regressors)
+
+# Compute mean prediction across regressors
+y_pred_ensemble = np.mean(y_pred_all, axis=1)
+
+# Compute variance across regressors
+variance_ensemble = np.var(y_pred_all, axis=1)
+
 
 # Fit the Normal-Inverse-Gamma regressor
 ngb_nig = NGBRegressor(Dist=NormalInverseGamma,
@@ -42,14 +52,31 @@ y_pred_nig = ngb_nig.predict(X_test)
 mse_ensemble = mean_squared_error(Y_test, y_pred_ensemble)
 mse_nig = mean_squared_error(Y_test, y_pred_nig)
 
-# Plotting the predictions
+# Sort by true values for proper shading
+sorted_indices = np.argsort(Y_test)
+Y_sorted = Y_test.values[sorted_indices]
+y_pred_sorted = y_pred_ensemble[sorted_indices]
+std_sorted = np.sqrt(variance_ensemble[sorted_indices])
+
+# Plot
 plt.figure(figsize=(10, 6))
 plt.scatter(Y_test, y_pred_ensemble, label=f'Ensemble Regressor (MSE={mse_ensemble:.2f})', alpha=0.6)
 plt.scatter(Y_test, y_pred_nig, label=f'NIG Regressor (MSE={mse_nig:.2f})', alpha=0.6)
 plt.plot([Y_test.min(), Y_test.max()], [Y_test.min(), Y_test.max()], 'k--', lw=2)
+
+# Plot shaded variance band
+plt.fill_between(
+    Y_sorted,
+    y_pred_sorted - std_sorted,
+    y_pred_sorted + std_sorted,
+    color='tab:blue',
+    alpha=0.2,
+    label='Ensemble ±1 std dev'
+)
+
 plt.xlabel('True Values')
 plt.ylabel('Predicted Values')
-plt.title('Comparison of NGB Ensemble vs NIG Regressor')
+plt.title('Comparison of NGB Ensemble vs NIG Regressor with Uncertainty')
 plt.legend()
 plt.grid(True)
 plt.tight_layout()

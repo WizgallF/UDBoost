@@ -462,7 +462,7 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
             raise ValueError(f"Ensemble method {self.ensemble_method} not supported. Use 'bagging'.")
         return self
     
-    def predict(self, X):
+    def predict(self, X, average: bool = True):
         """
         Predicts the target values for the input data X using the ensemble of NGBoost models.
         For additional parameters see ngboost.NGboost.predict
@@ -472,6 +472,9 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
         Output:
             Numpy array of predicted target values (n)
         """
-        predictions = [model.predict(X) for model in self.models]
-        return np.mean(predictions, axis=0)
+        if average:
+            predictions = [model.predict(X) for model in self.models]
+            return np.mean(predictions, axis=0)
+        else:
+            return np.array([model.predict(X) for model in self.models]).T
     
