@@ -7,8 +7,9 @@ except ImportError:
     from importlib_metadata import version
 
 from .api import NGBClassifier, NGBRegressor, NGBSurvival
-from .ngboost import NGBoost
+from .ngboost_core import NGBoost
 
 __all__ = ["NGBClassifier", "NGBRegressor", "NGBSurvival", "NGBoost"]
 
-__version__ = version(__name__)
+#__version__ = version(__name__)
+__version__ = "local-dev"

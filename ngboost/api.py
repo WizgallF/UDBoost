@@ -14,7 +14,7 @@ from ngboost.distns.utils import SurvivalDistnClass
 from ngboost.helpers import Y_from_censored
 from ngboost.learners import default_tree_learner
 from ngboost.manifold import manifold
-from ngboost.ngboost import NGBoost
+from .ngboost_core import NGBoost
 from ngboost.scores import LogScore
 
 
