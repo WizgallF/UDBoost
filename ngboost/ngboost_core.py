@@ -5,6 +5,8 @@
 # pylint: disable=unused-variable,invalid-unary-operand-type,attribute-defined-outside-init
 # pylint: disable=redundant-keyword-arg,protected-access,unnecessary-lambda-assignment
 import jax.numpy as np
+from functools import partial
+from jax import jit
 from sklearn.base import clone
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeRegressor
@@ -179,6 +181,7 @@ class NGBoost:
         return fitted
 
     # pylint: disable=too-many-positional-arguments
+    @partial(jit, static_argnames=["self"])
     def line_search(self, resids, start, Y, sample_weight=None, scale_init=1):
         D_init = self.Manifold(start.T)
         loss_init = D_init.total_score(Y, sample_weight)

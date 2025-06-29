@@ -1,4 +1,5 @@
 """NGBoost distributions"""
+from .normal_inverse_gamma import NormalInverseGamma, NIGLogScore
 from .categorical import Bernoulli, k_categorical
 from .cauchy import Cauchy
 from .distn import ClassificationDistn, Distn, RegressionDistn
@@ -34,4 +35,6 @@ __all__ = [
     "TFixedDf",
     "TFixedDfFixedVar",
     "Weibull",
+    "NormalInverseGamma",
+    "NIGLogScore",
 ]

@@ -4,7 +4,7 @@ import os
 # Add the path to the local ngboost module
 #sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "ngboost")))
 from ngboost import NGBRegressor
-from ngboost import NGBEnsembleRegressor
+#from ngboost import NGBEnsembleRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 from sklearn.datasets import load_diabetes
@@ -55,8 +55,8 @@ mse_nig = mean_squared_error(Y_test, y_pred_nig)
 # Sort by true values for proper shading
 sorted_indices = np.argsort(Y_test)
 Y_sorted = Y_test.values[sorted_indices]
-y_pred_sorted = y_pred_ensemble[sorted_indices]
-std_sorted = np.sqrt(variance_ensemble[sorted_indices])
+#y_pred_sorted = y_pred_ensemble[sorted_indices]
+#std_sorted = np.sqrt(variance_ensemble[sorted_indices])
 
 # Plot
 plt.figure(figsize=(10, 6))
@@ -67,8 +67,8 @@ plt.plot([Y_test.min(), Y_test.max()], [Y_test.min(), Y_test.max()], 'k--', lw=2
 # Plot shaded variance band
 plt.fill_between(
     Y_sorted,
-    y_pred_sorted - std_sorted,
-    y_pred_sorted + std_sorted,
+    #y_pred_sorted - std_sorted,
+    #y_pred_sorted + std_sorted,
     color='tab:blue',
     alpha=0.2,
     label='Ensemble ±1 std dev'

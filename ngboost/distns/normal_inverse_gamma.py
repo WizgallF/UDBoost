@@ -1,12 +1,18 @@
 import jax.numpy as np
+import jax
 from ngboost.distns.distn import RegressionDistn
 from ngboost.scores import LogScore
-from jax.scipy.special import gammaln, digamma, polygamma, psi
+from jax.scipy.special import gammaln, digamma
 import jax.scipy.stats as st
 #from scipy.optimize import approx_fprime
 #from numba import njit, prange
-from .nig_jit import d_score_numba, full_score_numba, compute_diag_fim#, digamma, trigamma, psi, gammaln
+from .nig_jit import d_score_jax, full_score_jax, compute_diag_fim_jax#, digamma, trigamma, psi, gammaln
 import line_profiler
+
+jax.config.update('jax_enable_x64', True)
+# -------------------------
+# Fast JAX implementations
+# -------------------------
 
 def softplus(x):
     """
@@ -16,7 +22,7 @@ def softplus(x):
         x (float or np.ndarray): Input value(s).
 
     Returns:
-        np.ndarray: Softplus-transformed values.
+        np.ndarray: Softplus-transformed values.ac
     """
     return np.log1p(np.exp(-np.abs(x))) + np.maximum(x, 0)
 
@@ -158,7 +164,7 @@ class NIGLogScore(LogScore):
         evid_strength = self.__class__.evid_strength
         kl_strength = self.__class__.kl_strength
         # 3) call the Numba ufunc — this returns an (n,) array of per-sample losses
-        per_sample_losses = full_score_numba(
+        per_sample_losses = full_score_jax(
             Y.astype(np.float64),
             mu.astype(np.float64),
             lam.astype(np.float64),
@@ -189,11 +195,11 @@ class NIGLogScore(LogScore):
             mu, lam, alpha, beta = self.mu, self.lam, self.alpha, self.beta
         else:
             mu, lam, alpha, beta = np.stack(params, axis=-1).T
-        
+        self._last_Y = Y
         evid_strength = self.__class__.evid_strength
         kl_strength = self.__class__.kl_strength
         # Stabilize
-        grads = d_score_numba(Y.astype(np.float64),
+        grads = d_score_jax(Y.astype(np.float64),
                                  mu.astype(np.float64),
                                  lam.astype(np.float64),
                                  alpha.astype(np.float64),
@@ -227,7 +233,7 @@ class NIGLogScore(LogScore):
         grads = self.current_grads
 
         if diagonal:
-            return compute_diag_fim(grads)
+            return compute_diag_fim_jax(grads)
         else:
             # Full FIM
             return np.array([np.outer(g, g) + 1e-5*np.eye(g.shape[0]) for g in grads])
