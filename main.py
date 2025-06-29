@@ -31,7 +31,7 @@ data_gen = SyntheticDataGenerator()
 #    plot=True,
 #    func=lambda x: (x / 500)**3
 #)
-def train_and_evaluate(X, y):
+def train_and_evaluate_ensemble(X, y):
     # Step 2: Extract features and target
     X = df[['x']].values
     y = df['y_noisy'].values
@@ -56,6 +56,36 @@ def train_and_evaluate(X, y):
     y_pred_all = ngb_ensemble.pred_uncertainty(X_test)
     return y_pred_all, X_test, Y_test, true_noise_std_test
 
+def train_and_evaluate_nig(X, y):
+    # Step 2: Extract features and target
+    X = df[['x']].values
+    y = df['y_noisy'].values
+
+    # Step 3: Normalize the target
+    z = (y - y.mean()) / y.std()
+
+    # Step 4: Track indices for train/test split
+    indices = np.arange(len(df))
+    X_train, X_test, Y_train, Y_test, idx_train, idx_test = train_test_split(
+        X, z, indices, test_size=0.2, random_state=42
+    )
+
+    # Step 5: Get the true aleatoric stds only for the test set
+    true_noise_std_test = df.loc[idx_test, 'true_noise_std'].values
+
+    # Step 6: Fit the ensemble regressor
+    ngb_nig = NGBRegressor(
+        Dist=NormalInverseGamma,
+        Score=NIGLogScore,
+        n_estimators=500,
+        learning_rate=0.01, 
+        verbose=True,
+        natural_gradient=True,)
+    ngb_nig.fit(X_train, Y_train)
+
+    # Step 7: Get aleatoric predictions
+    y_pred_all = ngb_nig.Dist.pred_uncertainty(X_test)
+    return y_pred_all, X_test, Y_test, true_noise_std_test
 
 # Step 8: Benchmark the aleatoric uncertainty
 benchmark = BenchmarkUncertainty()
@@ -75,7 +105,7 @@ df = data_gen.gen_epistemic_benchmark(n_samples=1000,
     func=lambda x: x**3
 )
 # Step 9: Train and evaluate the epistemic uncertainty model
-y_pred_all, X_test, Y_test, true_noise_std_test = train_and_evaluate(df[['x']].values, df['y_noisy'].values)
+y_pred_all, X_test, Y_test, true_noise_std_test = train_and_evaluate_nig(df[['x']].values, df['y_noisy'].values)
 # Step 10: Benchmark the epistemic uncertainty
 benchmark.within_sample_epistemic_uncertainty(
     X=X_test,
