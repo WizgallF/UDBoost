@@ -545,6 +545,29 @@ class NGBoost:
 
         return dist
 
+    def pred_uncertainty(self, X):
+        """
+        Predict the uncertainty of Y at the points X=x
+
+        Parameters:
+            X : DataFrame object or List or numpy array of predictors (n x p)
+                in numeric format
+
+        Output:
+            A dict of numpy arrays of the uncertainty estimates of Y with keys:
+                "mean": mean of the distribution
+                "aleatoric": aleatoric uncertainty of the distribution
+                "epistemic": epistemic uncertainty of the distribution
+                "predictive": total uncertainty of the distribution
+        """
+        dist = self.pred_dist(X)
+        if hasattr(self.Dist, "pred_uncertainty") & dist.is_EDL == True:
+            return dist.pred_uncertainty()    
+        else:
+            raise NotImplementedError(
+                "The distribution does not implement pred_uncertainty method."
+            )
+        
     def staged_pred_dist(self, X, max_iter=None):
         """
         Predict the conditional distribution of Y at the points X=x at multiple boosting iterations

@@ -37,10 +37,25 @@ dataset.plot(show=True)
 
 # --- Training and evaluating the NGBRegressor on both datasets --- #
 # - Change your regressor here - #
-regressor = NGBEnsembleRegressor(n_regressors=10)
-
+# - NGBoost version - #
+regressor = NGBRegressor(
+    Dist=NormalInverseGamma,
+    Score=NIGLogScore,
+    n_estimators=500,
+    learning_rate=0.01,
+    verbose=True,
+    natural_gradient=True,
+)
+    
 regressor.fit(dataset.X.reshape(-1, 1), dataset.y)
+uncertainty = regressor.pred_uncertainty(dataset.X.reshape(-1, 1))
+
+# - NGBEnsemble version - #
+#regressor = NGBEnsembleRegressor(n_regressors=10)
+#
+#regressor.fit(dataset.X.reshape(-1, 1), dataset.y)
 uncertainty = regressor.pred_uncertainty(dataset.dataspace.reshape(-1, 1))
+
 
 # --- Benchmarking the uncertainty quantification methods --- #
 benchmark = BenchmarkUncertainty()
