@@ -9,7 +9,7 @@ except ImportError:
 from .api import NGBClassifier, NGBRegressor, NGBSurvival, NGBEnsembleRegressor
 from .ngboost_core import NGBoost
 
-__all__ = ["NGBClassifier", "NGBRegressor", "NGBSurvival", "NGBoost"]
+__all__ = ["NGBClassifier", "NGBRegressor", "NGBSurvival", "NGBoost", "NGBEnsembleRegressor"]
 
 #__version__ = version(__name__)
 __version__ = "local-dev"

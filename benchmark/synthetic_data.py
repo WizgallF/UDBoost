@@ -1,151 +1,165 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from typing import Callable, Optional
+
 
 class SyntheticDataGenerator:
     '''
     A class to generate synthetic data for regression tasks with uncertainty disentanglement.
     '''
-    def gen_aleatoric_benchmark(self, n_samples: int = 1000, noise_levels: list = [0, 1], noise_scale: int = 1, random_seed: int = 42, plot: bool = False, func=None) -> pd.DataFrame:
-        """
-        Generates synthetic data with aleatoric uncertainty by varying noise levels in the target variable.
-        
-        Parameters:
-            n_samples (int): Number of samples to generate.
-            noise_levels (list): List of noise levels to apply at different sample spaces.
-            noise_scale (int): Scale factor for the noise.
-            random_seed (int): Random seed for reproducibility.
-            func (callable, optional): Function to generate the clean signal. Should accept a numpy array and return a numpy array.
-        
-        Returns:
-            pd.DataFrame: DataFrame containing the generated data with columns 'x', 'y_clean', 'y_noisy', and 'true_noise_std'.
-        """
-        np.random.seed(random_seed)
-        X = np.linspace(0, n_samples, n_samples)
-        # Use provided function or default to identity
-        if func is not None:
-            y_clean = func(X)
-        else:
-            y_clean = X
-
-        noise_regions = np.array_split(np.arange(n_samples), len(noise_levels))
-
-        # Generate y with region-specific aleatoric noise
-        y_noisy = np.copy(y_clean)
-        noise_std_per_point = np.zeros_like(y_clean)
-
-        for region, noise_level in zip(noise_regions, noise_levels):
-            noise = np.random.normal(0, noise_level, size=len(region))
-            y_noisy[region] += noise * noise_scale
-            noise_std_per_point[region] = noise_level * noise_scale
-
-        # Create dataframe
-        df = pd.DataFrame({
-            "x": X,
-            "y_clean": y_clean,
-            "y_noisy": y_noisy,
-            "true_noise_std": noise_std_per_point
-        })
-
-        if plot:
-            plt.figure(figsize=(12, 6))
-            plt.plot(X, y_clean, label="Clean Signal", color="black", linestyle="--")
-            plt.scatter(X, y_noisy, c=noise_std_per_point, cmap="viridis", s=10, label="Noisy Observations")
-            plt.colorbar(label="True Noise Std Dev")
-            plt.title("Synthetic Dataset with Region-Specific Aleatoric Noise")
-            plt.xlabel("x")
-            plt.ylabel("y")
-            plt.legend()
-            plt.grid(True)
-            plt.tight_layout()
-            plt.show()
-
-        return df
-    
-    def gen_epistemic_benchmark(
+    def gen_synthetic_benchmark(
         self,
         n_samples: int = 1000,
-        noise_std: float = 0.1,
-        data_densities: list = [0, 1],
+        noise_levels: list = [0.1, 0.1],
+        data_densities: list = [1.0, 1.0],
         random_seed: int = 42,
-        plot: bool = False,
-        func=None
-    ) -> pd.DataFrame:
-        '''
-        Generates synthetic data with epistemic uncertainty by varying data density in the feature space.
+        func: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+        normalized_y: bool = False
+    ) -> 'DataSet':
+        """
+        Generate synthetic regression data with configurable aleatoric (noise) and epistemic (density) uncertainty.
+
+        The ground-truth noise and density values are returned over the entire dataspace.
 
         Parameters:
-            n_samples (int): Number of samples to generate.
-            noise_std (float): Standard deviation of the Gaussian noise added to the target variable.
-            data_densities (list): List of data densities to apply to the feature space.
-            random_seed (int): Random seed for reproducibility.
-        '''
+            n_samples (int): Total number of points in the [0, 1] domain.
+            noise_levels (list): Standard deviation of noise per region.
+            data_densities (list): Fraction of data kept per region (0 to 1).
+            random_seed (int): Seed for reproducibility.
+            func (Callable): True underlying function. Defaults to sin(2πx).
+            normalized_y (bool): Whether to z-normalize outputs.
+
+        Returns:
+            DataSet: Contains dataspace, selected samples X, noisy and clean outputs,
+                    and full-length ground-truth noise/density profiles.
+        """
         np.random.seed(random_seed)
-
-        # Step 1: Generate full input space and compute noisy targets
-        X_full = np.linspace(0, 1, n_samples)
         func = func or (lambda x: np.sin(2 * np.pi * x))
-        y_full = func(X_full) + np.random.normal(0, noise_std, size=n_samples)
 
-        # Step 2: Define density regions
-        num_regions = len(data_densities)
+        # Full 1D input space and clean function values
+        dataspace = np.linspace(0, 1, n_samples)
+        y_clean = func(dataspace)
+
+        # Initialize full-length noise and density arrays
+        true_noise_std = np.zeros(n_samples)
+        true_data_density = np.zeros(n_samples)
+
+        # Define regions
+        num_regions = len(noise_levels)
         region_edges = np.linspace(0, 1, num_regions + 1)
-
-        # Step 3: Subsample points based on regional densities
         keep_indices = []
-        density_lookup = []
+
+        y_noisy = np.zeros(n_samples)  # Initialize noisy output
 
         for i in range(num_regions):
-            # Region bounds
-            start, end = region_edges[i], region_edges[i + 1]
-            region_mask = (X_full >= start) & (X_full < end)
-            region_idx = np.where(region_mask)[0]
+            # Region indices
+            mask = (dataspace >= region_edges[i]) & (dataspace < region_edges[i + 1])
+            indices = np.where(mask)[0]
 
-            # Subsample points based on density
-            n_keep = int(len(region_idx) * data_densities[i])
-            if n_keep > 0:
-                selected = np.random.choice(region_idx, size=n_keep, replace=False)
-                keep_indices.extend(selected)
-                density_lookup.extend([data_densities[i]] * n_keep)
+            # Assign region-wide noise and density
+            true_noise_std[indices] = noise_levels[i]
+            true_data_density[indices] = data_densities[i]
 
-        # Step 4: Construct final dataset
-        keep_indices = np.array(keep_indices)
-        X = X_full[keep_indices]
-        y = y_full[keep_indices]
-        densities = np.array(density_lookup)
+            # Add noise to the clean function values in this region
+            noise = np.random.normal(0, noise_levels[i], size=len(indices))
+            y_noisy[indices] = y_clean[indices] + noise
 
-        df = pd.DataFrame({
-            'x': X,
-            'y_noisy': y,
-            'true_noise_std': densities,
-        })
+            # Subsample according to density (epistemic uncertainty)
+            n_keep = int(len(indices) * data_densities[i])
+            selected = np.random.choice(indices, size=n_keep, replace=False)
+            keep_indices.extend(selected)
 
-        # Optional plotting
-        if plot:
-            import matplotlib.pyplot as plt
+        # Only keep noisy outputs for selected indices
+        y_noisy = y_noisy[keep_indices]
 
-            plt.figure(figsize=(12, 6))
-            X_plot = np.linspace(0, 1, 500)
-            y_plot = func(X_plot)
-            plt.plot(X_plot, y_plot, label="Clean Signal", color="black", linestyle="--")
+        # Selected input samples
+        keep_indices = np.sort(keep_indices)
+        X = dataspace[keep_indices]
 
-            for i in range(num_regions):
-                x_start = region_edges[i]
-                x_end = region_edges[i + 1]
-                density = data_densities[i]
-                alpha = 0.1 + 0.4 * density
-                plt.axvspan(x_start, x_end, color='purple', alpha=alpha, label=f'Density {density}' if i == 0 else None)
+        # Normalize if requested
+        if normalized_y:
+            mean = np.mean(y_clean)
+            std = np.std(y_clean)
+            y_noisy = (y_noisy - mean) / std
+            y_clean = (y_clean - mean) / std
 
-            plt.scatter(X, y, color="blue", s=10, label="Sampled Points")
-            plt.title("Synthetic Dataset with Region-Specific Epistemic Uncertainty")
-            plt.xlabel("x")
-            plt.ylabel("y")
-            plt.legend()
-            plt.grid(True)
-            plt.tight_layout()
+        return DataSet(
+            dataspace=dataspace,
+            X=X,
+            y=y_noisy,
+            y_clean=y_clean,
+            true_function=func,
+            true_noise_std=true_noise_std,
+            true_data_density=true_data_density
+        )
+
+
+
+class DataSet:
+    """
+    A class to represent a dataset for regression tasks with uncertainty quantification.
+    
+    Attributes:
+        dataspace: np.ndarray The space of the input features
+        X: np.ndarray The input features
+        y: np.ndarray The target variable
+        y_clean: np.ndarray The clean target variable without noise
+        true_function: Callable The true function used to generate the target variable
+        true_noise_std: np.ndarray The true noise standard deviation over the dataspace
+        true_data_density: np.ndarray The true data density over the dataspace
+    """
+    
+    def __init__(self, dataspace: np.ndarray, X: np.ndarray, y: np.ndarray, y_clean: np.array, true_function: Callable, true_noise_std: np.ndarray, true_data_density: np.ndarray):
+        self.dataspace = dataspace
+        self.X = X
+        self.y = y
+        self.y_clean = y_clean
+        self.true_function = true_function
+        self.true_noise_std = true_noise_std
+        self.true_data_density = true_data_density
+
+    def plot(self, ax: Optional[plt.Axes] = None, show: bool = False):
+        """
+        Plots the dataset with the true function, noisy observations, and true noise std as a shaded area.
+        """
+        # Create a new axes if none provided
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 6))
+
+        # Plot true function
+        ax.plot(self.dataspace, self.y_clean, label='True Function', color='black')
+
+        # Plot aleatoric noise as shaded region
+        ax.fill_between(
+            self.dataspace,
+            self.y_clean - self.true_noise_std,
+            self.y_clean + self.true_noise_std,
+            color='orange',
+            alpha=0.3,
+            label='True Noise Std'
+        )
+
+        # Background shading for epistemic uncertainty (data density)
+        norm_density = (self.true_data_density - np.min(self.true_data_density)) / (
+            np.ptp(self.true_data_density) + 1e-8
+        )
+        for i in range(len(self.dataspace) - 1):
+            ax.axvspan(
+                self.dataspace[i],
+                self.dataspace[i + 1],
+                color=plt.cm.Blues(norm_density[i]),
+                alpha=0.2,
+                linewidth=0
+            )
+
+        # Plot noisy observations
+        ax.scatter(self.X, self.y, label='Noisy Observations', color='blue', s=10)
+
+        ax.set_title('Synthetic Dataset')
+        ax.set_xlabel('X')
+        ax.set_ylabel('y')
+        ax.legend()
+        ax.grid()
+        if show:
             plt.show()
-
-        return df
-
-
-

@@ -23,7 +23,6 @@ from ngboost.learners import default_tree_learner
 from ngboost.manifold import manifold
 from .ngboost_core import NGBoost
 from ngboost.scores import LogScore
-import pandas as pd
 
 
 class NGBRegressor(NGBoost, BaseEstimator):
@@ -493,7 +492,7 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
         """
         return [model.pred_dist(X, max_iter=max_iter) for model in self.models]
     
-    def pred_uncertainty(self, X):
+    def pred_uncertainty(self, X, mode: str = 'bayesian'):
         """
         Computes the Bayesian uncertainty disentanglement of the NGBoost ensemble.
 
@@ -503,20 +502,24 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
             X (array-like): Input data for which to compute uncertainties
 
         Returns:
-            pd.DataFrame: A DataFrame containing the following columns for each training sample:
+            Dict: A DataFrame containing the following columns for each training sample:
                 - mean_prediction: The mean prediction across all models.
                 - aleatoric_uncertainty: The mean predicted variance (aleatoric uncertainty) across all models.
-                - epistemic_uncertainty: The variance of predictions across all models (epistemic uncertainty).
+                - epistemic_uncertainty: The variance of predictions across all models (epistemic uncertainty).#
+                - predictive_uncertainty: The sum of aleatoric and epistemic uncertainties, representing the total predictive uncertainty.
         """
-        predictions = np.array([model.predict(X) for model in self.models])
-        parameters = np.array([model.pred_dist(X).params for model in self.models])
-        mean_prediction = np.mean(predictions, axis=0)
-        aleatoric_uncertainty = np.mean([param['scale'] for param in parameters], axis=0)
-        epistemic_uncertainty = np.var(predictions, axis=0)
-        print(f"Mean prediction shape: {mean_prediction.shape}, Aleatoric uncertainty shape: {aleatoric_uncertainty.shape}, Epistemic uncertainty shape: {epistemic_uncertainty.shape}")
+        if mode == 'bayesian':    
+            predictions = np.array([model.predict(X) for model in self.models])
+            parameters = np.array([model.pred_dist(X).params for model in self.models])
+            mean_prediction = np.mean(predictions, axis=0)
+            aleatoric_uncertainty = np.mean([param['scale'] for param in parameters], axis=0)
+            epistemic_uncertainty = np.var(predictions, axis=0)
+        elif mode == 'levi':
+            raise NotImplementedError("The 'levi' mode for pred_uncertainty is not implemented yet.")
 
-        return pd.DataFrame({
+        return {
             'mean': mean_prediction,
+            'predictive': aleatoric_uncertainty + epistemic_uncertainty,
             'aleatoric': aleatoric_uncertainty,
             'epistemic': epistemic_uncertainty
-        })
+        }
