@@ -8,14 +8,9 @@ from ngboost.distns import Normal, NormalInverseGamma, NIGLogScore
 from benchmark.synthetic_data import SyntheticDataGenerator
 from benchmark.benchmark import BenchmarkUncertainty
 
-# - Utilities - #
-from utils.train_and_evaluate import train_and_evaluate
 
 # --- External imports --- #
-# - SKlearn imports - #
-from sklearn.model_selection import train_test_split
-
-# - Numpy imports - #
+# - Numpy import - #
 import numpy as np
 
 
@@ -39,7 +34,9 @@ dataset = SyntheticDataGenerator.gen_synthetic_benchmark(
     normalized_y=True
 )
 dataset.plot(show=True)
+
 # --- Training and evaluating the NGBRegressor on both datasets --- #
+# - Change your regressor here - #
 regressor = NGBEnsembleRegressor(n_regressors=10)
 
 regressor.fit(dataset.X.reshape(-1, 1), dataset.y)
