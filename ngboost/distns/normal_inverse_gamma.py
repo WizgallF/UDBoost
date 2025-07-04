@@ -3,8 +3,7 @@ from ngboost.distns.distn import RegressionDistn
 from ngboost.scores import LogScore
 from scipy.special import gammaln, digamma, polygamma, psi
 import scipy.stats as st
-from scipy.optimize import approx_fprime
-from numba import njit, prange
+
 from .nig_jit import d_score_numba, full_score_numba, compute_diag_fim#, digamma, trigamma, psi, gammaln
 import line_profiler
 
@@ -259,7 +258,8 @@ class NormalInverseGamma(RegressionDistn):
         self.mu    = params[0]
         self.lam   = np.exp(params[1])     # Avoid zero
         self.alpha = np.exp(params[2]) + 1      # Enforce α > 1
-        self.beta  = np.exp(params[3])     # Avoid zero
+        self.beta  = np.exp(params[3])   
+        self.is_EDL = True  # Avoid zero
         #print(f"Initialized NIG with params: mu={self.mu}, lam={self.lam}, alpha={self.alpha}, beta={self.beta}")
         #print(f"Mean beta: {np.mean(self.beta)}, Min: {np.min(self.beta)}, Max: {np.max(self.beta)}")
 
@@ -305,8 +305,13 @@ class NormalInverseGamma(RegressionDistn):
                 - "epistemic": β² / (λ(α - 1)²(α - 2)).
         """
         aleatoric = self.beta / (self.alpha - 1)
-        epistemic = self.beta**2 / (self.lam * (self.alpha - 1)**2 * (self.alpha - 2))
-        return {"mean": self.mu, "aleatoric": aleatoric, "epistemic": epistemic}
+        epistemic = self.beta / (self.lam * (self.alpha - 1))
+        return {
+            "mean": self.mu, 
+            "predictive": aleatoric + epistemic,
+            "aleatoric": aleatoric, 
+            "epistemic": epistemic
+        }
 
     def pred_dist(self):
         """

@@ -545,6 +545,7 @@ class NGBoost:
 
         return dist
 
+        
     def staged_pred_dist(self, X, max_iter=None):
         """
         Predict the conditional distribution of Y at the points X=x at multiple boosting iterations
