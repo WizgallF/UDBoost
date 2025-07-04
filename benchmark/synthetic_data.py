@@ -8,7 +8,7 @@ class SyntheticDataGenerator:
     '''
     A class to generate synthetic data for regression tasks with uncertainty disentanglement.
     '''
-    def gen_synthetic_benchmark(
+    def gen_1d_synthetic_benchmark(
         self,
         n_samples: int = 1000,
         noise_levels: list = [0.1, 0.1],
@@ -74,7 +74,6 @@ class SyntheticDataGenerator:
         y_noisy = y_noisy[keep_indices]
 
         # Selected input samples
-        keep_indices = np.sort(keep_indices)
         X = dataspace[keep_indices]
 
         # Normalize if requested
@@ -119,7 +118,7 @@ class DataSet:
         self.true_noise_std = true_noise_std
         self.true_data_density = true_data_density
 
-    def plot(self, ax: Optional[plt.Axes] = None, show: bool = False):
+    def plot_1d_syn_benchmark(self, ax: Optional[plt.Axes] = None, show: bool = False):
         """
         Plots the dataset with the true function, noisy observations, and true noise std as a shaded area.
         """

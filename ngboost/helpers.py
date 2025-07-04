@@ -1,5 +1,7 @@
 import numpy as np
 from sklearn.utils import check_array
+# Scipy
+from scipy.stats import norm
 
 
 def Y_from_censored(T, E=None):
@@ -21,3 +23,4 @@ def Y_from_censored(T, E=None):
     Y["Event"] = E.astype(np.bool_)
     Y["Time"] = T.astype(np.float64)
     return Y
+
