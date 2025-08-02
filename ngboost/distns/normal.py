@@ -23,6 +23,8 @@ class NormalLogScore(LogScore):
         FI[:, 1, 1] = 2
         return FI
 
+    def metric_wasserstein(self):
+        pass
 
 class NormalCRPScore(CRPScore):
     def score(self, Y):

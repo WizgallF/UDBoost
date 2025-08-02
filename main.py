@@ -2,7 +2,7 @@
 # - NGBoost - #
 from ngboost import NGBRegressor
 from ngboost import NGBEnsembleRegressor
-from ngboost.distns import Normal, NormalInverseGamma, NIGLogScore
+from ngboost.distns import Normal, NormalInverseGamma, NIGLogScore, NIGLogScoreSVGD
 
 # - Benchmark imports -
 from benchmark.synthetic_data import SyntheticDataGenerator
