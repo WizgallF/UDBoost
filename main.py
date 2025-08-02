@@ -2,7 +2,7 @@
 # - NGBoost - #
 from ngboost import NGBRegressor
 from ngboost import NGBEnsembleRegressor
-from ngboost.distns import Normal, NormalInverseGamma, NIGLogScore
+from ngboost.distns import Normal, NormalInverseGamma, NIGLogScore, NIGLogScoreSVGD
 
 # - Benchmark imports -
 from benchmark.synthetic_data import SyntheticDataGenerator
@@ -37,14 +37,21 @@ dataset.plot(show=True)
 
 # --- Training and evaluating the NGBRegressor on both datasets --- #
 # - Change your regressor here - #
-# - NGBoost version - #
+# - NIG version - #
+
+y = dataset.y
+
+    # Step 3: Normalize the target
+z = (y - y.mean()) / y.std()
+dataset.y = z
+
 regressor = NGBRegressor(
     Dist=NormalInverseGamma,
-    Score=NIGLogScore,
-    n_estimators=500,
+    Score=NIGLogScoreSVGD,
+    n_estimators=1000,
     learning_rate=0.01,
     verbose=True,
-    natural_gradient=True,
+    natural_gradient=False,
 )
     
 regressor.fit(dataset.X.reshape(-1, 1), dataset.y)
