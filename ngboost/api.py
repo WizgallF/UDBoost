@@ -6,6 +6,7 @@ from sklearn.base import BaseEstimator
 from sklearn.utils import check_array
 from sklearn.utils import resample
 
+
 # Numpy
 import numpy as np
 
@@ -463,7 +464,7 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
         """
         if self.ensemble_method == "bagging":
             for i in range(self.n_regressors):
-                X_subsample, y_subsample = resample(X, y, replace=True, n_samples=int(0.8 * len(X)), random_state=i) # Make the subsampling size a parameter?
+                X_subsample, y_subsample = resample(X, y, replace=True, n_samples=int(0.75 * len(X)), random_state=i) # Make the subsampling size a parameter?
                 model = NGBRegressor(
                     Dist=self.Dist,
                     Score=self.Score,
@@ -514,7 +515,7 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
         """
         return [model.pred_dist(X, max_iter=max_iter) for model in self.models]
     
-    def pred_uncertainty(self, X, mode: str = 'bayesian'):
+    def pred_uncertainty(self, X, mode: str = 'bayesian_kl'):
         """
         Computes the Bayesian uncertainty disentanglement of the NGBoost ensemble.
 
@@ -530,18 +531,71 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
                 - epistemic_uncertainty: The variance of predictions across all models (epistemic uncertainty).#
                 - predictive_uncertainty: The sum of aleatoric and epistemic uncertainties, representing the total predictive uncertainty.
         """
-        if mode == 'bayesian':    
+        if mode == 'bayesian_mean':    
             predictions = np.array([model.predict(X) for model in self.models])
             parameters = np.array([model.pred_dist(X).params for model in self.models])
             mean_prediction = np.mean(predictions, axis=0)
             aleatoric_uncertainty = np.mean([param['scale'] for param in parameters], axis=0)
             epistemic_uncertainty = np.var(predictions, axis=0)
-        elif mode == 'levi':
-            raise NotImplementedError("The 'levi' mode for pred_uncertainty is not implemented yet.")
+        elif mode == 'levi_simple':
+            predictions = np.array([model.predict(X) for model in self.models])
+            parameters = np.array([model.pred_dist(X).params for model in self.models])
+            mean_prediction = np.mean(predictions, axis=0)
+            aleatoric_uncertainty_lower_bound = np.min([param['scale'] for param in parameters], axis=0)
+            aleatoric_uncertainty_upper_bound = np.max([param['scale'] for param in parameters], axis=0)
+            # Extract all loc vectors
+            locs = [param['loc'] for param in parameters]
+            print(f"Number of models: {len(locs)}, Dimension of locs: {len(locs[0]) if locs else 0}")
+
+            # Stack into array of shape (M, D) where M = # of models, D = dimension
+            loc_matrix = np.stack(locs)  # shape: (M, D)
+            print(f"Shape of loc_matrix: {loc_matrix.shape}")
+
+            # Compute pairwise L2 distances (or differences)
+            pairwise_diff = loc_matrix[:, None, :] - loc_matrix[None, :, :]  # shape: (M, M, D)
+            print(f"Pairwise differences shape: {pairwise_diff.shape}")
+
+            # Compute max difference across all model pairs and dimensions
+            epistemic_uncertainty = np.max(np.abs(pairwise_diff), axis=(0, 1)) 
+            print(f"Shape of epistemic_uncertainty: {epistemic_uncertainty.shape}")
+        elif mode == 'bayesian_kl':
+            predictions = np.array([model.predict(X) for model in self.models])
+            parameters = np.array([model.pred_dist(X).params for model in self.models])
+            mean_prediction = np.mean(predictions, axis=0)
+            aleatoric_uncertainty = 0.5 * (1 + np.log(2*np.pi) + np.mean([np.log(param['scale']**2) for param in parameters], axis=0))
+            mean_mu = np.mean([param['loc'] for param in parameters], axis=0)
+            mean_sigma = np.mean([param['scale'] for param in parameters], axis=0)
+            
+            log_mean_sigma = np.mean(np.log([param['scale']**2 for param in parameters]), axis=0)
+            mean_mu_deviation = np.mean([param['loc']**2 - mean_mu**2 for param in parameters], axis=0) / mean_sigma**2
+            epistemic_uncertainty = 0.5 * (np.log(mean_sigma**2) - log_mean_sigma + mean_mu_deviation)
+        elif mode == 'levi_kl':
+            predictions = np.array([model.predict(X) for model in self.models])
+            parameters = np.array([model.pred_dist(X).params for model in self.models])
+            mean_prediction = np.mean(predictions, axis=0)
+            # The agent with the minimum entropy
+            aleatoric_uncertainty_lower_bound = np.min([0.5 * np.log(2 * np.pi * np.e * param['scale']**2) for param in parameters], axis=0)
+            # The agent with the maximum entropy
+            aleatoric_uncertainty_upper_bound = np.max([0.5 * np.log(2 * np.pi * np.e * param['scale']**2) for param in parameters], axis=0)
+            # Extract all loc vectors
+            locs = [param['loc'] for param in parameters]
+            variances = [param['scale'] for param in parameters]
+            divergences = []
+            for model_p in parameters:
+                for model_q in parameters:
+                    divergence = np.log(model_q['scale']) - np.log(model_p['scale']) + (model_p['scale']**2 + (model_p['loc'] - model_q['loc'])**2) / (2 * model_q['scale']**2) - 0.5
+                    divergences.append(divergence)
+            divergences = np.array(divergences)
+            print(f"Shape of divergences: {divergences.shape}")
+            epistemic_uncertainty = np.max(divergences, axis=0)
 
         return {
             'mean': mean_prediction,
-            'predictive': aleatoric_uncertainty + epistemic_uncertainty,
-            'aleatoric': aleatoric_uncertainty,
-            'epistemic': epistemic_uncertainty
+            'predictive': aleatoric_uncertainty + epistemic_uncertainty if 'aleatoric_uncertainty' in locals() else None,
+            'predicitve_upper_bound': aleatoric_uncertainty_upper_bound + epistemic_uncertainty if 'aleatoric_uncertainty_upper_bound' in locals() else None,
+            'predicitve_lower_bound': aleatoric_uncertainty_lower_bound + epistemic_uncertainty if 'aleatoric_uncertainty_lower_bound' in locals() else None,
+            'aleatoric': aleatoric_uncertainty if 'aleatoric_uncertainty' in locals() else None,
+            'epistemic': epistemic_uncertainty,
+            'aleatoric_lower_bound': aleatoric_uncertainty_lower_bound if 'aleatoric_uncertainty_lower_bound' in locals() else None,
+            'aleatoric_upper_bound': aleatoric_uncertainty_upper_bound if 'aleatoric_uncertainty_upper_bound' in locals() else None,
         }
