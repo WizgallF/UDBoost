@@ -5,7 +5,7 @@
 from sklearn.base import BaseEstimator
 from sklearn.utils import check_array
 from sklearn.utils import resample
-
+from sklearn.utils import check_random_state
 
 # Numpy
 import numpy as np
@@ -57,6 +57,8 @@ class NGBRegressor(NGBoost, BaseEstimator):
                                     loss has to increase before the algorithm stops early.
                                     Set to None to disable early stopping and validation.
                                     None enables running over the full data set.
+        SGLB                   : whether to use Stochastic Gradient Langevin Boosting (SGLB) or not.
+        langevin_noise_scale: the scale of the Langevin noise to add during training (only used if SGLB=True)
 
     Output:
         An NGBRegressor object that can be fit.
@@ -79,6 +81,8 @@ class NGBRegressor(NGBoost, BaseEstimator):
         random_state=None,
         validation_fraction=0.1,
         early_stopping_rounds=None,
+        SGLB=False,
+        langevin_noise_scale=1,
     ):
         assert issubclass(
             Dist, RegressionDistn
@@ -104,6 +108,8 @@ class NGBRegressor(NGBoost, BaseEstimator):
             random_state,
             validation_fraction,
             early_stopping_rounds,
+            SGLB=SGLB,
+            langevin_noise_scale=langevin_noise_scale,
         )
 
         self._estimator_type = "regressor"
@@ -393,8 +399,12 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
                                     None enables running over the full data set.
         n_regressors    : the number of NGBoost regressors to fit in the ensemble
         ensemble_method : the method create the ensemble, options are
-                            'bagging' Creating an ensemble by fitting
-                                             each regressor on a different bootstrap sample of the data
+                            'stochastic_gradient_boosting' Creating an ensemble by fitting using a subsample of the data
+                            'bagging' Creating an ensemble by fitting on random subsamples of the data
+                            'SGBL' Creating an ensemble by fitting using a stochastic gradient boosting approach
+        langevin_noise_scale: the scale of the Langevin noise to add during training (only used if ensemble_method='SGBL')
+        bagging_frac    : the fraction of the data to use for each regressor in the ensemble when using bagging
+
 
     Output:
         An NGBRegressor object that can be fit.
@@ -417,7 +427,9 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
         validation_fraction=0.1,
         early_stopping_rounds=None,
         n_regressors=10,
-        ensemble_method="bagging",
+        ensemble_method="stochastic_gradient_boosting",
+        bagging_frac=0.8,
+        langevin_noise_scale=1,
         ):
             assert issubclass(
                 Dist, RegressionDistn
@@ -449,6 +461,8 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
             self.n_regressors = n_regressors
             self.ensemble_method = ensemble_method
             self.models = []
+            self.bagging_frac = bagging_frac
+            self.langevin_noise_scale = langevin_noise_scale
 
     def fit(self, X, y, **kwargs):
         """
@@ -462,9 +476,37 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
         Output:
             self : returns a list of fitted NGBRegressor models
         """
-        if self.ensemble_method == "bagging":
+        if self.ensemble_method == "stochastic_gradient_boosting":
+            rng = check_random_state(self.random_state)            
             for i in range(self.n_regressors):
-                X_subsample, y_subsample = resample(X, y, replace=True, n_samples=int(0.75 * len(X)), random_state=i) # Make the subsampling size a parameter?
+                seed = rng.randint(0, 1e6)
+                print(f"\n Fitting regressor [{i+1}/{self.n_regressors}] with seed {seed}")
+                model = NGBRegressor(
+                    Dist=self.Dist,
+                    Score=self.Score,
+                    Base=self.Base,
+                    natural_gradient=self.natural_gradient,
+                    n_estimators=self.n_estimators,
+                    learning_rate=self.learning_rate,
+                    minibatch_frac=self.minibatch_frac,
+                    col_sample=self.col_sample,
+                    verbose=self.verbose,
+                    verbose_eval=self.verbose_eval,
+                    tol=self.tol,
+                    random_state=seed,
+                )
+                model.fit(X, y, **kwargs)
+                self.models.append(model)
+        elif self.ensemble_method == "bagging":
+            for i in range(self.n_regressors):
+                print(f"\n Fitting regressor [{i+1}/{self.n_regressors}]")
+                # Use a subsample of the data for bagging
+                X_resampled, y_resampled = resample(
+                    X, y, 
+                    replace=False,  # subsample without replacement
+                    n_samples=int(len(X) * self.bagging_frac),  # fraction of data
+                    random_state=self.random_state
+                )
                 model = NGBRegressor(
                     Dist=self.Dist,
                     Score=self.Score,
@@ -479,10 +521,33 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
                     tol=self.tol,
                     random_state=self.random_state,
                 )
-                model.fit(X_subsample, y_subsample, **kwargs)
+                model.fit(X_resampled, y_resampled, **kwargs)
+                self.models.append(model)
+        elif self.ensemble_method == "SGBL":
+            #rng = check_random_state(self.random_state)            
+            for i in range(self.n_regressors):
+                print(f"\n Fitting regressor [{i+1}/{self.n_regressors}]")
+                #seed = rng.randint(0, 1e6)
+                model = NGBRegressor(
+                    Dist=self.Dist,
+                    Score=self.Score,
+                    Base=self.Base,
+                    natural_gradient=self.natural_gradient,
+                    n_estimators=self.n_estimators,
+                    learning_rate=self.learning_rate,
+                    minibatch_frac=self.minibatch_frac,
+                    col_sample=self.col_sample,
+                    verbose=self.verbose,
+                    verbose_eval=self.verbose_eval,
+                    tol=self.tol,
+                    random_state=self.random_state,
+                    SGLB=True,  # Use SGLB for ensemble
+                    langevin_noise_scale=self.langevin_noise_scale,
+                )
+                model.fit(X, y, **kwargs)
                 self.models.append(model)
         else:
-            raise ValueError(f"Ensemble method {self.ensemble_method} not supported. Use 'bagging'.")
+            raise ValueError(f"Ensemble method {self.ensemble_method} not supported. Use 'stochastic_gradient_boosting'.")
         return self
     
     def predict(self, X, average: bool = True):
@@ -533,6 +598,7 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
         """
         if mode == 'bayesian_mean':    
             predictions = np.array([model.predict(X) for model in self.models])
+            print(predictions)
             parameters = np.array([model.pred_dist(X).params for model in self.models])
             mean_prediction = np.mean(predictions, axis=0)
             aleatoric_uncertainty = np.mean([param['scale'] for param in parameters], axis=0)

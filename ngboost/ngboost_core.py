@@ -46,6 +46,8 @@ class NGBoost:
                                     loss has to increase before the algorithm stops early.
                                     Set to None to disable early stopping and validation.
                                     None enables running over the full data set.
+        SGLB             : whether to use Stochastic Gradient Langevin Boosting (SGLB) or not.
+        langevin_noise_scale: the scale of the Langevin noise to add during training (only used if SGLB=True)
 
 
     Output:
@@ -69,6 +71,8 @@ class NGBoost:
         random_state=None,
         validation_fraction=0.1,
         early_stopping_rounds=None,
+        SGLB=False,
+        langevin_noise_scale=1,
     ):
         self.Dist = Dist
         self.Score = Score
@@ -91,6 +95,8 @@ class NGBoost:
         self.best_val_loss_itr = None
         self.validation_fraction = validation_fraction
         self.early_stopping_rounds = early_stopping_rounds
+        self.SGLB = SGLB
+        self.langevin_noise_scale = langevin_noise_scale
 
         if hasattr(self.Dist, "multi_output"):
             self.multi_output = self.Dist.multi_output
@@ -102,7 +108,7 @@ class NGBoost:
         # Remove the unpicklable entries.
         del state["Manifold"]
         state["Dist_name"] = self.Dist.__name__
-        if self.Dist.__name__ == "Categorical":
+        if self.Dist.__name__ == "Categorical": 
             del state["Dist"]
             state["K"] = self.Dist.n_params + 1
         elif self.Dist.__name__ == "MVN":
@@ -432,14 +438,27 @@ class NGBoost:
             loss = loss_list[-1]
             grads = D.grad(Y_batch, natural=self.natural_gradient)
 
+            # Add Gaussian noise to the gradient to implement SGLB (see https://arxiv.org/pdf/2001.07248)
+            # Set the diffusion temperature to the dataset size as suggested by Malinin, Prokhorenkova, Ustimenko (ICLR 2021)
+            if self.SGLB:
+                noise_scale = self.langevin_noise_scale * np.sqrt(2 / (len(grads) * self.learning_rate))
+                noise = np.random.normal(0, noise_scale, size=grads.shape)
+                grads += noise
+
             proj_grad = self.fit_base(X_batch, grads, weight_batch)
             scale = self.line_search(proj_grad, P_batch, Y_batch, weight_batch)
 
-            params -= (
-                self.learning_rate
-                * scale
-                * np.array([m.predict(X[:, col_idx]) for m in self.base_models[-1]]).T
-            )
+            # Add the model shrinkage rate to regularize the SGLB algorithm (see https://arxiv.org/pdf/2001.07248)
+            if self.SGLB:
+                gamma = 1/(2*len(grads))
+                weak_learner_preds = np.array([m.predict(X[:, col_idx]) for m in self.base_models[-1]]).T
+                params = (1 - gamma * self.learning_rate) * params - self.learning_rate * scale * weak_learner_preds
+            else:
+                params -= (
+                    self.learning_rate
+                    * scale
+                    * np.array([m.predict(X[:, col_idx]) for m in self.base_models[-1]]).T
+                )
 
             val_loss = 0
             if X_val is not None and Y_val is not None:

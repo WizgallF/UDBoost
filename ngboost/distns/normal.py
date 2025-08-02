@@ -11,7 +11,7 @@ class NormalLogScore(LogScore):
     def score(self, Y):
         return -self.dist.logpdf(Y)
 
-    def d_score(self, Y):
+    def d_score(self, Y, learning_rate: float = 0.1):
         D = np.zeros((len(Y), 2))
         D[:, 0] = (self.loc - Y) / self.var
         D[:, 1] = 1 - ((self.loc - Y) ** 2) / self.var
