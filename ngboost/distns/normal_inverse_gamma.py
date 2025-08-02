@@ -246,10 +246,15 @@ class NIGLogScoreSVGD(LogScore):
     upper_bound = None
     evid_strength = 0.1
     kl_strength = 0.1
-    length_scale = 0.01
+    length_scale = 0.05
+    warmup = 10
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.boosting_step = 0
 
     @classmethod
-    def set_params(cls, evid_strength=None, kl_strength=None, length_scale=None):
+    def set_params(cls, evid_strength=None, kl_strength=None, length_scale=None, warmup=None):
         """
         Sets the regularization strengths for the NIG log score.
 
@@ -263,6 +268,8 @@ class NIGLogScoreSVGD(LogScore):
             cls.kl_strength = kl_strength
         if length_scale is not None:
             cls.length_scale = length_scale
+        if warmup is not None:
+            cls.warmup = warmup
 
     @classmethod
     def set_bounds(cls, lower, upper):
@@ -376,44 +383,44 @@ class NIGLogScoreSVGD(LogScore):
 
     @line_profiler.profile
     def d_score(self, Y, params=None):
-        """
-        Computes the gradient of the NIG loss with respect to the model parameters.
-
-        Parameters:
-            Y (np.ndarray): Target values.
-            params (list or None): Optional list of model parameters.
-
-        Returns:
-            np.ndarray: Per-sample gradient vectors.
-        """
-        # Unpack or use stored
+    # 0) unpack
         if params is None:
             mu, lam, alpha, beta = self.mu, self.lam, self.alpha, self.beta
         else:
             mu, lam, alpha, beta = np.stack(params, axis=-1).T
-        
-        evid_strength = self.__class__.evid_strength
-        kl_strength = self.__class__.kl_strength
-        # Stabilize
-        grads = d_score_numba(Y.astype(np.float64),
-                                 mu.astype(np.float64),
-                                 lam.astype(np.float64),
-                                 alpha.astype(np.float64),
-                                 beta.astype(np.float64),
-                                 evid_strength,
-                                 kl_strength)
-        
-        theta = np.stack([mu, lam, alpha, beta], axis=-1)
+
+        # 1) raw NIG gradients (size: n×4)
+        raw_grads = d_score_numba(
+            Y.astype(np.float64),
+            mu.astype(np.float64),
+            lam.astype(np.float64),
+            alpha.astype(np.float64),
+            beta.astype(np.float64),
+            self.evid_strength,
+            self.kl_strength
+        )
+
+        # 2) warm-up: just return the plain gradients  
+        self.boosting_step += 1
+        if self.boosting_step < self.warmup:
+            self.current_grads = raw_grads
+            return raw_grads
+
+        # 3) compute SVGD kernel + its grad in θ-space
+        theta = np.stack([mu, lam, alpha, beta], axis=-1)  # shape (n,4)
         K, dK = rbf_kernel_and_grad_numba(theta, gamma=self.length_scale)
-        M = theta.shape[0]
-        print(f"Computed kernel K: {K[0]}, dK: {dK[0]} for {M} particles")
-        stein_grads = (K @ grads + dK.sum(axis=0)) / M
-        self.current_grads = grads
-        self.current_K = K / M
-        self.current_dK = dK / M
+        n = theta.shape[0]
+
+        # 4) assemble the Stein update φ_i = (∑_j K_ij g_j + ∑_j dK_ij)/n
+        stein_grads = (K.dot(raw_grads) + dK.sum(axis=1)) / n
+
+        # 5) stash the raw grads, K and dK for `metric` later
+        self.current_grads = raw_grads
+        self.current_K     = K
+        self.current_dK    = dK
+
         return stein_grads
-    
-    @line_profiler.profile
+
     def metric(self, Y=None, params=None, diagonal: bool = False):
         """
         Diagonal approximate Wasserstein-Newton operator (WGBoost eq 8–9)
@@ -427,6 +434,19 @@ class NIGLogScoreSVGD(LogScore):
             mu, lam, alpha, beta = self.mu, self.lam, self.alpha, self.beta
         else:
             mu, lam, alpha, beta = np.stack(params, axis=-1).T
+
+
+        if self.boosting_step < self.warmup:
+            mu, lam, alpha, beta = self.mu, self.lam, self.alpha, self.beta
+            if Y is None:
+                Y = self._last_Y
+            grads = self.current_grads
+
+            if diagonal:
+                return compute_diag_fim(grads)
+            else:
+                # Full FIM
+                return np.array([np.outer(g, g) + 1e-5*np.eye(g.shape[0]) for g in grads])
     
         if Y is None:
             Y = self._last_Y
@@ -458,7 +478,6 @@ class NIGLogScoreSVGD(LogScore):
             return np.diagonal(H, axis1=1, axis2=2)  # shape (M,4)
         else:
             return H  # shape (M,4,4)
-
 
 class NormalInverseGamma(RegressionDistn):
     """
