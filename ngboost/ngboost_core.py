@@ -73,6 +73,7 @@ class NGBoost:
         early_stopping_rounds=None,
         SGLB=False,
         langevin_noise_scale=1,
+        epistemic_scaling=False,
     ):
         self.Dist = Dist
         self.Score = Score
@@ -396,6 +397,8 @@ class NGBoost:
             y_numeric=True,
         )
 
+        if self.epistemic_scaling:
+            self.X_train = X
         self.n_features = X.shape[1]
 
          
@@ -586,7 +589,10 @@ class NGBoost:
 
         params = np.asarray(self.pred_param(X, max_iter))
         dist = self.Dist(params.T)
-
+        if self.epistemic_scaling:
+            dist.X_test = X.copy() 
+            dist.X_train = self.X_train
+            dist.leaf_tree = self.base_models[-1][0]
         return dist
 
         
