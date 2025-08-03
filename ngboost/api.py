@@ -401,7 +401,7 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
         ensemble_method : the method create the ensemble, options are
                             'stochastic_gradient_boosting' Creating an ensemble by fitting using a subsample of the data
                             'bagging' Creating an ensemble by fitting on random subsamples of the data
-                            'SGBL' Creating an ensemble by fitting using a stochastic gradient boosting approach
+                            'SGLB' Creating an ensemble by fitting using a stochastic gradient boosting approach
         langevin_noise_scale: the scale of the Langevin noise to add during training (only used if ensemble_method='SGBL')
         bagging_frac    : the fraction of the data to use for each regressor in the ensemble when using bagging
 
@@ -494,6 +494,7 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
                     verbose_eval=self.verbose_eval,
                     tol=self.tol,
                     random_state=seed,
+                    SGLB=False,  # Use standard NGBoost for ensemble
                 )
                 model.fit(X, y, **kwargs)
                 self.models.append(model)
@@ -520,14 +521,13 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
                     verbose_eval=self.verbose_eval,
                     tol=self.tol,
                     random_state=self.random_state,
+                    SGLB=False,  # Use standard NGBoost for bagging
                 )
                 model.fit(X_resampled, y_resampled, **kwargs)
                 self.models.append(model)
-        elif self.ensemble_method == "SGBL":
-            #rng = check_random_state(self.random_state)            
+        elif self.ensemble_method == "SGLB":
             for i in range(self.n_regressors):
                 print(f"\n Fitting regressor [{i+1}/{self.n_regressors}]")
-                #seed = rng.randint(0, 1e6)
                 model = NGBRegressor(
                     Dist=self.Dist,
                     Score=self.Score,
@@ -547,7 +547,7 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
                 model.fit(X, y, **kwargs)
                 self.models.append(model)
         else:
-            raise ValueError(f"Ensemble method {self.ensemble_method} not supported. Use 'stochastic_gradient_boosting'.")
+            raise ValueError(f"Ensemble method {self.ensemble_method} not supported. Use 'stochastic_gradient_boosting' or 'SGLB' or 'bagging'.")
         return self
     
     def predict(self, X, average: bool = True):

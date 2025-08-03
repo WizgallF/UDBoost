@@ -462,13 +462,16 @@ class NGBoost:
 
             val_loss = 0
             if X_val is not None and Y_val is not None:
-                val_params -= (
-                    self.learning_rate
-                    * scale
-                    * np.array(
-                        [m.predict(X_val[:, col_idx]) for m in self.base_models[-1]]
-                    ).T
-                )
+                if self.SGLB:
+                    gamma = 1/(2*len(grads))
+                    weak_learner_preds = np.array([m.predict(X[:, col_idx]) for m in self.base_models[-1]]).T
+                    params = (1 - gamma * self.learning_rate) * params - self.learning_rate * scale * weak_learner_preds
+                else:
+                    params -= (
+                        self.learning_rate
+                        * scale
+                        * np.array([m.predict(X[:, col_idx]) for m in self.base_models[-1]]).T
+                    )
                 val_loss = val_loss_monitor(self.Manifold(val_params.T), Y_val)
                 val_loss_list += [val_loss]
                 if val_loss < best_val_loss:
