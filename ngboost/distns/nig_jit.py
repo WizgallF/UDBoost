@@ -2,7 +2,7 @@
 import numpy as np
 import math
 from numba import njit, prange, float64, vectorize, guvectorize
-
+from sklearn.tree import DecisionTreeRegressor
 
 @njit(fastmath=True)
 def digamma(x):
@@ -192,3 +192,76 @@ def rbf_kernel_and_grad_numba(X, gamma):
                 diff = X[i, k] - X[j, k]
                 dK[i, j, k] = -2.0 * gamma * diff * k_val
     return K, dK
+
+
+def compute_leaf_boxes(tree: DecisionTreeRegressor, feature_dim: int):
+    """
+    For each leaf node in `tree`, compute the axis-aligned [min, max] box
+    in R^feature_dim that the leaf covers.
+    Returns:
+        leaf_box: dict mapping leaf_id -> (lower_bounds[feature_dim], upper_bounds[feature_dim])
+    """
+    t = tree.tree_
+    # node -> (lo_bounds, hi_bounds)
+    boxes = {0: (np.full(feature_dim, -np.inf),
+                 np.full(feature_dim,  np.inf))}
+    leaf_box = {}
+
+    def recurse(node_id):
+        lo, hi = boxes[node_id]
+        # if this node is a leaf
+        if t.children_left[node_id] == t.children_right[node_id]:
+            leaf_box[node_id] = (lo.copy(), hi.copy())
+            return
+        feat = t.feature[node_id]
+        thr  = t.threshold[node_id]
+        # left child: x[feat] <= thr
+        lo_l, hi_l = lo.copy(), hi.copy()
+        hi_l[feat] = min(hi[feat], thr)
+        boxes[t.children_left[node_id]] = (lo_l, hi_l)
+        recurse(t.children_left[node_id])
+        # right child: x[feat] > thr
+        lo_r, hi_r = lo.copy(), hi.copy()
+        lo_r[feat] = max(lo[feat], thr)
+        boxes[t.children_right[node_id]] = (lo_r, hi_r)
+        recurse(t.children_right[node_id])
+
+    recurse(0)
+    return leaf_box
+
+
+def leaf_volume_density_vec(tree, X):
+    """
+    Vectorized leaf‐volume density: p_hat[i] ∝ n_leaf(i) / vol(leaf(i)),
+    with mean(p_hat)=1, but using only NumPy indexing (no Python loops).
+    """
+    n, d = X.shape
+
+    # 1) which leaf each row lands in
+    leaf_ids = tree.apply(X)            # shape (n,)
+
+    # 2) count per leaf, and get unique ids
+    unique, counts = np.unique(leaf_ids, return_counts=True)
+    # build a dense map from leaf_id -> count
+    max_id = unique.max()
+    count_map = np.zeros(max_id+1, int)
+    count_map[unique] = counts         # now count_map[leaf_ids] gives counts per row
+
+    # 3) build bounding‐boxes once (you still need the recursion for that)
+    #    but we can then compute volumes for only the unique leaves
+    boxes = compute_leaf_boxes(tree, d)   # your existing function
+    # volumes in a dense array
+    vol_map = np.empty(max_id+1, float)
+    for lid in unique:
+        lo, hi = boxes[lid]
+        span = hi - lo
+        span[np.isinf(span)] = 1e6
+        vol_map[lid] = np.prod(span)
+
+    # 4) density per sample, vectorized
+    p_hat = count_map[leaf_ids] / (vol_map[leaf_ids] + 1e-12)
+
+    # 5) normalize to mean=1
+    p_hat *= (n / p_hat.sum())
+
+    return p_hat

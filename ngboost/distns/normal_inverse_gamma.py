@@ -4,7 +4,13 @@ from ngboost.scores import LogScore
 from scipy.special import gammaln, digamma, polygamma, psi
 import scipy.stats as st
 
-from .nig_jit import d_score_numba, full_score_numba, compute_diag_fim, rbf_kernel_and_grad_numba
+from .nig_jit import (
+    d_score_numba,
+    full_score_numba,
+    compute_diag_fim,
+    rbf_kernel_and_grad_numba,
+    leaf_volume_density_vec,
+)
 import line_profiler
 
 def softplus(x):
@@ -251,7 +257,8 @@ class NIGLogScoreSVGD(LogScore):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.boosting_step = 0
+        self.prev_tree = None
+        self.X_train = None
 
     def set_train_data(self, X):
         """Call this once before you .fit(), so we know X inside d_score."""
@@ -260,6 +267,13 @@ class NIGLogScoreSVGD(LogScore):
     def set_prev_tree(self, tree):
         """Call this after each boosting iteration, passing the tree you just fit."""
         self.prev_tree = tree
+
+    def set_counter(self, boosting_step):
+        """
+        Returns the number of steps in the current boosting step.
+        This is used to track the number of boosting iterations.
+        """
+        self.boosting_step = boosting_step
         
     @classmethod
     def set_params(cls, evid_strength=None, kl_strength=None, length_scale=None, warmup=None):
@@ -408,24 +422,50 @@ class NIGLogScoreSVGD(LogScore):
             self.kl_strength
         )
 
-        # 2) warm-up: just return the plain gradients  
-        self.boosting_step += 1
+        ## 2) warm-up
         if self.boosting_step < self.warmup:
             self.current_grads = raw_grads
             return raw_grads
-
-        # 3) compute SVGD kernel + its grad in θ-space
-        theta = np.stack([mu, lam, alpha, beta], axis=-1)  # shape (n,4)
-        K, dK = rbf_kernel_and_grad_numba(theta, gamma=self.length_scale)
+        self.boosting_step += 1
+        # 3) SVGD kernel in θ-space
+        theta = np.stack([mu, lam, alpha, beta], axis=-1)  # (n,4)
+        K_theta, dK_theta = rbf_kernel_and_grad_numba(theta, gamma=self.length_scale)
         n = theta.shape[0]
 
-        # 4) assemble the Stein update φ_i = (∑_j K_ij g_j + ∑_j dK_ij)/n
-        stein_grads = (K.dot(raw_grads) + dK.sum(axis=1)) / n
+        ## 4) data‐space “Mahalanobis” kernel
+        ##    here we use 1D X → for multi-D just replace with diff across dims
+        #X      = self.X_train.ravel()                      # (n,)
+        #epi    = self.pred_uncertainty()["epistemic"].ravel()  # (n,)
+#
+        ## broadcast to (n,n)
+        #diff   = X[:, None] - X[None, :]                    # (n,n)
+        #varsum = epi[:, None] + epi[None, :] + 1e-12        # (n,n)
+        #K_data = np.exp(-0.5 * (diff*diff) / varsum)        # (n,n)
 
-        # 5) stash the raw grads, K and dK for `metric` later
+        # 5) combine kernels
+        #K  = K_theta * K_data                               # elementwise
+        #dK = dK_theta * K_data[:, :, None]                  # broadcast into last dim
+        # 4) SVGD pseudo-residuals
+        stein_grads = (K_theta.dot(raw_grads) + dK_theta.sum(axis=1)) / n
+
+        
+        # 5) leaf‐volume scaling *only* on raw_lam gradient:
+        #if self.prev_tree is not None and self.X_train is not None:
+        #    p_hat = leaf_volume_density_vec(self.prev_tree, self.X_train)  # (n,)
+        #    print(f"p_hat: {p_hat.shape}, min: {np.min(p_hat)}, max: {np.max(p_hat)}")
+        #    w     = 1.0/(p_hat + 1e-12) 
+        #    stein_grads[:, 1] *= w
+        
+        #    mu      = self.mu.ravel()
+        #    epi_var = self.pred_uncertainty()["epistemic"].ravel()
+        #    X       = self.X_train.ravel()
+        #    d2      = (X - mu)**2 / (epi_var + 1e-12)
+        #    w_maha  = np.exp(-1 * d2)
+        #    stein_grads[:,1] *= w_maha
+        # 6) stash for metric
         self.current_grads = raw_grads
-        self.current_K     = K
-        self.current_dK    = dK
+        self.current_K     = K_theta
+        self.current_dK    = dK_theta
 
         return stein_grads
 
@@ -514,6 +554,7 @@ class NormalInverseGamma(RegressionDistn):
         self.alpha = np.exp(params[2]) + 1      # Enforce α > 1
         self.beta  = np.exp(params[3])   
         self.is_EDL = True  # Avoid zero
+
         #print(f"Initialized NIG with params: mu={self.mu}, lam={self.lam}, alpha={self.alpha}, beta={self.beta}")
         #print(f"Mean beta: {np.mean(self.beta)}, Min: {np.min(self.beta)}, Max: {np.max(self.beta)}")
 
@@ -574,6 +615,7 @@ class NormalInverseGamma(RegressionDistn):
         Returns:
             tuple: (mu, lam, alpha, beta)
         """
+
         return self.mu, self.lam, self.alpha, self.beta 
     
     
@@ -671,3 +713,70 @@ class NormalInverseGamma(RegressionDistn):
         log_prob = coeff + norm - 0.5 * (nu + 1) * np.log1p(sq_term)
 
         return log_prob
+    
+class NormalInverseGammaLeafOOD(NormalInverseGamma):
+    """
+    Same as NormalInverseGamma but at predict-time we down-weight
+    the epistemic variance by 1/sqrt(leaf_volume_density) so that
+    points in sparse leaves get larger uncertainty.
+    """
+
+    def __init__(self, params, *, leaf_tree=None, X_train=None, X_test=None):
+        # call the base ctor (builds mu, lam, alpha, beta)
+        super().__init__(params)
+        # store the tree & the points we’ll predict on
+        self.leaf_tree = leaf_tree
+        self.X_train  = X_train
+        self.X_test   = X_test
+        
+    def pred_uncertainty(self):
+        aleatoric = self.beta / (self.alpha - 1)           # shape (n_test,)
+        epistemic = self.beta / (self.lam * (self.alpha - 1))
+        pred_var  = aleatoric + epistemic
+
+        if self.leaf_tree is not None and self.X_train is not None and self.X_test is not None:
+            eps = 1e-12
+
+            # 1) leaf‐volume weight
+            p_hat = leaf_volume_density_vec(self.leaf_tree, self.X_test)
+            w_vol = np.log(p_hat + eps)
+
+            # 2) “Mahalanobis” with diagonal cov = aleatoric
+            #    here we assume X is 1‐D; for multi‐D you’d vectorize per‐feature
+            x_train_mean = np.mean(self.X_train, axis=0)     # (d,)
+            diffs = self.X_test - x_train_mean               # (n_test, d)
+            # if d>1, you could sum over dims, but here we do per‐row dot diag:
+            # m2[i] = sum_j (diffs[i,j]**2 / aleatoric[i])
+            # which for 1‐D is just (diffs[:,0]**2 / aleatoric)
+            m2 = np.einsum('ij,i->i', diffs**2, 1.0/(aleatoric + eps))
+
+            w_maha = np.exp(-10 * m2)                       # (n_test,)
+
+            # 3) combine
+            print(f"w_vol: {w_vol}, w_maha: {w_maha}")
+            w_comb = w_vol / w_maha
+
+            # 4) inflate λ for low‐weight points
+            self.lam = self.lam * (1.0/(w_comb + eps))
+
+            # 5) recompute uncertainties
+            aleatoric = self.beta / (self.alpha - 1)
+            epistemic = self.beta / (self.lam * (self.alpha - 1))
+            pred_var  = aleatoric + epistemic
+
+        return {
+            "mean":       self.mu,
+            "aleatoric":  aleatoric,
+            "epistemic":  epistemic,
+            "predictive": pred_var
+        }
+
+            
+
+    def predict_variance(self, X):
+        """
+        NGBoost’s sklearn‐API calls this for var estimates;
+        we stash X so pred_uncertainty can see it.
+        """
+        self.X_query = X
+        return self.pred_uncertainty()["predictive"]
