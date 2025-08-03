@@ -607,7 +607,12 @@ class NGBoost:
             zip(self.base_models, self.scalings, self.col_idxs), start=1
         ):
             resids = np.array([model.predict(X[:, col_idx]) for model in models]).T
-            params -= self.learning_rate * resids * s
+            if self.SGLB:
+                gamma = 1/(2*len(resids))
+                weak_learner_preds = np.array([m.predict(X[:, col_idx]) for m in models]).T
+                params = (1 - gamma * self.learning_rate) * params - self.learning_rate * s * weak_learner_preds
+            else:
+                params -= self.learning_rate * resids * s
             dists = self.Dist(
                 np.copy(params.T)
             )  # if the params aren't copied, param changes with stages carry over to dists

@@ -402,6 +402,7 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
                             'stochastic_gradient_boosting' Creating an ensemble by fitting using a subsample of the data
                             'bagging' Creating an ensemble by fitting on random subsamples of the data
                             'SGLB' Creating an ensemble by fitting using a stochastic gradient boosting approach
+                            'virtual_SGBL' Creating an ensemble by fitting using a virtual stochastic gradient boosting approach
         langevin_noise_scale: the scale of the Langevin noise to add during training (only used if ensemble_method='SGBL')
         bagging_frac    : the fraction of the data to use for each regressor in the ensemble when using bagging
 
@@ -476,11 +477,14 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
         Output:
             self : returns a list of fitted NGBRegressor models
         """
+
+        # Train each weak learner with a subsample of the data (minibatch_frac) and randomize the minibatches between models
         if self.ensemble_method == "stochastic_gradient_boosting":
             rng = check_random_state(self.random_state)            
             for i in range(self.n_regressors):
                 seed = rng.randint(0, 1e6)
-                print(f"\n Fitting regressor [{i+1}/{self.n_regressors}] with seed {seed}")
+                if self.verbose:
+                    print(f"\n Fitting regressor [{i+1}/{self.n_regressors}] with seed {seed}")
                 model = NGBRegressor(
                     Dist=self.Dist,
                     Score=self.Score,
@@ -494,13 +498,16 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
                     verbose_eval=self.verbose_eval,
                     tol=self.tol,
                     random_state=seed,
-                    SGLB=False,  # Use standard NGBoost for ensemble
+                    SGLB=False,
                 )
                 model.fit(X, y, **kwargs)
                 self.models.append(model)
+
+        # Train each model with a subsample of the data (bagging_frac) (Can be combined with a minibatch_frac for bagging + stochastic gradient boosting)
         elif self.ensemble_method == "bagging":
             for i in range(self.n_regressors):
-                print(f"\n Fitting regressor [{i+1}/{self.n_regressors}]")
+                if self.verbose:
+                    print(f"\n Fitting regressor [{i+1}/{self.n_regressors}]")
                 # Use a subsample of the data for bagging
                 X_resampled, y_resampled = resample(
                     X, y, 
@@ -525,9 +532,13 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
                 )
                 model.fit(X_resampled, y_resampled, **kwargs)
                 self.models.append(model)
+
+        # Train each model using SGLB
         elif self.ensemble_method == "SGLB":
             for i in range(self.n_regressors):
-                print(f"\n Fitting regressor [{i+1}/{self.n_regressors}]")
+                if self.verbose:
+                    print(f"\n Fitting regressor [{i+1}/{self.n_regressors}]")
+
                 model = NGBRegressor(
                     Dist=self.Dist,
                     Score=self.Score,
@@ -541,11 +552,31 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
                     verbose_eval=self.verbose_eval,
                     tol=self.tol,
                     random_state=self.random_state,
-                    SGLB=True,  # Use SGLB for ensemble
+                    SGLB=True, 
                     langevin_noise_scale=self.langevin_noise_scale,
                 )
                 model.fit(X, y, **kwargs)
                 self.models.append(model)
+        # Train an ensemble by truncating the SGLB model at various stages (Fit it as a single model, and use staged predictions)
+        elif self.ensemble_method == "virtual_SGBL":
+            model = NGBRegressor(
+                Dist=self.Dist,
+                Score=self.Score,
+                Base=self.Base,
+                natural_gradient=self.natural_gradient,
+                n_estimators=self.n_estimators,
+                learning_rate=self.learning_rate,
+                minibatch_frac=self.minibatch_frac,
+                col_sample=self.col_sample,
+                verbose=self.verbose,
+                verbose_eval=self.verbose_eval,
+                tol=self.tol,
+                random_state=self.random_state,
+                SGLB=True, 
+                langevin_noise_scale=self.langevin_noise_scale,
+            )
+            model.fit(X, y, **kwargs)
+            self.models = [model]
         else:
             raise ValueError(f"Ensemble method {self.ensemble_method} not supported. Use 'stochastic_gradient_boosting' or 'SGLB' or 'bagging'.")
         return self
@@ -582,7 +613,7 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
     
     def pred_uncertainty(self, X, mode: str = 'bayesian_kl'):
         """
-        Computes the Bayesian uncertainty disentanglement of the NGBoost ensemble.
+        Computes the Bayesian uncertainty disentanglement of the NGBoost ensemble (This only works with a Gaussian distribution).
 
         This method calculates both epistemic (model) and aleatoric (data) uncertainties for the predictions made by the ensemble of models. It aggregates predictions and variances from all models in the ensemble to provide a comprehensive uncertainty estimate for each prediction.
 
@@ -596,38 +627,36 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
                 - epistemic_uncertainty: The variance of predictions across all models (epistemic uncertainty).#
                 - predictive_uncertainty: The sum of aleatoric and epistemic uncertainties, representing the total predictive uncertainty.
         """
+        if self.ensemble_method == "virtual_SGBL":
+            staged_predictions = self.models[0].staged_pred_dist(X)
+            # Extract n_regressors predictions after n_estimators/2 iterations
+            indices = np.linspace(len(staged_predictions) // 2, len(staged_predictions) - 1, self.n_regressors, dtype=int)
+            parameters = np.array([staged_predictions[i].params for i in indices])
+            print(parameters.shape)
+        else:
+            parameters = np.array([model.pred_dist(X).params for model in self.models])
+        
+        
+        mean_prediction = np.mean([param['loc'] for param in parameters], axis=0)
         if mode == 'bayesian_mean':    
-            predictions = np.array([model.predict(X) for model in self.models])
-            print(predictions)
-            parameters = np.array([model.pred_dist(X).params for model in self.models])
-            mean_prediction = np.mean(predictions, axis=0)
             aleatoric_uncertainty = np.mean([param['scale'] for param in parameters], axis=0)
-            epistemic_uncertainty = np.var(predictions, axis=0)
+            epistemic_uncertainty = np.var([param['loc'] for param in parameters], axis=0)
         elif mode == 'levi_simple':
-            predictions = np.array([model.predict(X) for model in self.models])
-            parameters = np.array([model.pred_dist(X).params for model in self.models])
-            mean_prediction = np.mean(predictions, axis=0)
             aleatoric_uncertainty_lower_bound = np.min([param['scale'] for param in parameters], axis=0)
             aleatoric_uncertainty_upper_bound = np.max([param['scale'] for param in parameters], axis=0)
+            
             # Extract all loc vectors
             locs = [param['loc'] for param in parameters]
-            print(f"Number of models: {len(locs)}, Dimension of locs: {len(locs[0]) if locs else 0}")
 
             # Stack into array of shape (M, D) where M = # of models, D = dimension
             loc_matrix = np.stack(locs)  # shape: (M, D)
-            print(f"Shape of loc_matrix: {loc_matrix.shape}")
 
             # Compute pairwise L2 distances (or differences)
             pairwise_diff = loc_matrix[:, None, :] - loc_matrix[None, :, :]  # shape: (M, M, D)
-            print(f"Pairwise differences shape: {pairwise_diff.shape}")
 
             # Compute max difference across all model pairs and dimensions
             epistemic_uncertainty = np.max(np.abs(pairwise_diff), axis=(0, 1)) 
-            print(f"Shape of epistemic_uncertainty: {epistemic_uncertainty.shape}")
         elif mode == 'bayesian_kl':
-            predictions = np.array([model.predict(X) for model in self.models])
-            parameters = np.array([model.pred_dist(X).params for model in self.models])
-            mean_prediction = np.mean(predictions, axis=0)
             aleatoric_uncertainty = 0.5 * (1 + np.log(2*np.pi) + np.mean([np.log(param['scale']**2) for param in parameters], axis=0))
             mean_mu = np.mean([param['loc'] for param in parameters], axis=0)
             mean_sigma = np.mean([param['scale'] for param in parameters], axis=0)
@@ -636,9 +665,6 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
             mean_mu_deviation = np.mean([param['loc']**2 - mean_mu**2 for param in parameters], axis=0) / mean_sigma**2
             epistemic_uncertainty = 0.5 * (np.log(mean_sigma**2) - log_mean_sigma + mean_mu_deviation)
         elif mode == 'levi_kl':
-            predictions = np.array([model.predict(X) for model in self.models])
-            parameters = np.array([model.pred_dist(X).params for model in self.models])
-            mean_prediction = np.mean(predictions, axis=0)
             # The agent with the minimum entropy
             aleatoric_uncertainty_lower_bound = np.min([0.5 * np.log(2 * np.pi * np.e * param['scale']**2) for param in parameters], axis=0)
             # The agent with the maximum entropy
@@ -652,7 +678,6 @@ class NGBEnsembleRegressor(NGBoost, BaseEstimator):
                     divergence = np.log(model_q['scale']) - np.log(model_p['scale']) + (model_p['scale']**2 + (model_p['loc'] - model_q['loc'])**2) / (2 * model_q['scale']**2) - 0.5
                     divergences.append(divergence)
             divergences = np.array(divergences)
-            print(f"Shape of divergences: {divergences.shape}")
             epistemic_uncertainty = np.max(divergences, axis=0)
 
         return {
