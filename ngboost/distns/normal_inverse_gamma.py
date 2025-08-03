@@ -12,6 +12,7 @@ from .nig_jit import (
     leaf_volume_density_vec,
 )
 import line_profiler
+from sklearn.neighbors import NearestNeighbors
 
 def softplus(x):
     """
@@ -432,37 +433,8 @@ class NIGLogScoreSVGD(LogScore):
         K_theta, dK_theta = rbf_kernel_and_grad_numba(theta, gamma=self.length_scale)
         n = theta.shape[0]
 
-        ## 4) data‐space “Mahalanobis” kernel
-        ##    here we use 1D X → for multi-D just replace with diff across dims
-        #X      = self.X_train.ravel()                      # (n,)
-        #epi    = self.pred_uncertainty()["epistemic"].ravel()  # (n,)
-#
-        ## broadcast to (n,n)
-        #diff   = X[:, None] - X[None, :]                    # (n,n)
-        #varsum = epi[:, None] + epi[None, :] + 1e-12        # (n,n)
-        #K_data = np.exp(-0.5 * (diff*diff) / varsum)        # (n,n)
-
-        # 5) combine kernels
-        #K  = K_theta * K_data                               # elementwise
-        #dK = dK_theta * K_data[:, :, None]                  # broadcast into last dim
-        # 4) SVGD pseudo-residuals
         stein_grads = (K_theta.dot(raw_grads) + dK_theta.sum(axis=1)) / n
 
-        
-        # 5) leaf‐volume scaling *only* on raw_lam gradient:
-        #if self.prev_tree is not None and self.X_train is not None:
-        #    p_hat = leaf_volume_density_vec(self.prev_tree, self.X_train)  # (n,)
-        #    print(f"p_hat: {p_hat.shape}, min: {np.min(p_hat)}, max: {np.max(p_hat)}")
-        #    w     = 1.0/(p_hat + 1e-12) 
-        #    stein_grads[:, 1] *= w
-        
-        #    mu      = self.mu.ravel()
-        #    epi_var = self.pred_uncertainty()["epistemic"].ravel()
-        #    X       = self.X_train.ravel()
-        #    d2      = (X - mu)**2 / (epi_var + 1e-12)
-        #    w_maha  = np.exp(-1 * d2)
-        #    stein_grads[:,1] *= w_maha
-        # 6) stash for metric
         self.current_grads = raw_grads
         self.current_K     = K_theta
         self.current_dK    = dK_theta
@@ -739,11 +711,16 @@ class NormalInverseGammaLeafOOD(NormalInverseGamma):
 
             # 1) leaf‐volume weight
             p_hat = leaf_volume_density_vec(self.leaf_tree, self.X_test)
-            w_vol = np.log(p_hat + eps)
+            w_vol = np.log(p_hat + eps) * 0.1
 
-            # 2) “Mahalanobis” with diagonal cov = aleatoric
-            #    here we assume X is 1‐D; for multi‐D you’d vectorize per‐feature
-            x_train_mean = np.mean(self.X_train, axis=0)     # (d,)
+  
+            # Find k nearest neighbors of each X_test in X_train
+            k = min(10, self.X_train.shape[0])  # choose k, e.g., 10 or less if not enough samples
+            nbrs = NearestNeighbors(n_neighbors=k, algorithm='auto').fit(self.X_train)
+            # For each test point, get indices of k nearest neighbors in X_train
+            _, indices = nbrs.kneighbors(self.X_test)
+            # Compute mean of k nearest neighbors for each test point
+            x_train_mean = np.mean(self.X_train[indices], axis=1)  # shape (n_test, d)
             diffs = self.X_test - x_train_mean               # (n_test, d)
             # if d>1, you could sum over dims, but here we do per‐row dot diag:
             # m2[i] = sum_j (diffs[i,j]**2 / aleatoric[i])
@@ -753,8 +730,7 @@ class NormalInverseGammaLeafOOD(NormalInverseGamma):
             w_maha = np.exp(-10 * m2)                       # (n_test,)
 
             # 3) combine
-            print(f"w_vol: {w_vol}, w_maha: {w_maha}")
-            w_comb = w_vol / w_maha
+            w_comb = w_vol * w_maha
 
             # 4) inflate λ for low‐weight points
             self.lam = self.lam * (1.0/(w_comb + eps))
