@@ -402,6 +402,7 @@ class NGBoost:
         # --- HOOK #1: only enable leaf‐density when Score is exactly your SVGD class ---
         if self.Score is NIGLogScoreSVGD:
             self._needs_leaf_density = True
+            print("Enabling leaf‐density computation for SVGD score.")
             self._X_for_leaf = X
         else:
             self._needs_leaf_density = False
@@ -442,7 +443,9 @@ class NGBoost:
             self.col_idxs.append(col_idx)
 
             D = self.Manifold(P_batch.T)
-
+            # 'Set boosting counter for SVGD score to track iterations'
+            if self.Score is NIGLogScoreSVGD:
+                D.set_counter(itr)
             loss_list += [train_loss_monitor(D, Y_batch, weight_batch)]
             loss = loss_list[-1]
             grads = D.grad(Y_batch, natural=self.natural_gradient)
@@ -459,8 +462,6 @@ class NGBoost:
 
             # — HOOK #2: register the leaf‐tree & X with our SVGD score object —
             if self._needs_leaf_density:
-                # get the Score instance from the Distribution
-                D = self.Manifold(P_batch.T)
                 # store the full training X so score can compute leaf‐volumes
                 D.set_train_data(self._X_for_leaf)
                 # pick the mu‐tree (first model) to define leaves
