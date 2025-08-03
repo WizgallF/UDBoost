@@ -246,13 +246,21 @@ class NIGLogScoreSVGD(LogScore):
     upper_bound = None
     evid_strength = 0.1
     kl_strength = 0.1
-    length_scale = 0.05
-    warmup = 10
+    length_scale = 0.1
+    warmup = 5
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.boosting_step = 0
 
+    def set_train_data(self, X):
+        """Call this once before you .fit(), so we know X inside d_score."""
+        self.X_train = X
+
+    def set_prev_tree(self, tree):
+        """Call this after each boosting iteration, passing the tree you just fit."""
+        self.prev_tree = tree
+        
     @classmethod
     def set_params(cls, evid_strength=None, kl_strength=None, length_scale=None, warmup=None):
         """
@@ -566,7 +574,7 @@ class NormalInverseGamma(RegressionDistn):
         Returns:
             tuple: (mu, lam, alpha, beta)
         """
-        return self.mu, self.lam, self.alpha, self.beta
+        return self.mu, self.lam, self.alpha, self.beta 
     
     
     def metric(self, Y):
