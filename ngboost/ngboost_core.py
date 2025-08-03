@@ -10,7 +10,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.utils import check_array, check_random_state, check_X_y
 
-from ngboost.distns import MultivariateNormal, Normal, k_categorical
+from ngboost.distns import MultivariateNormal, Normal, k_categorical, NIGLogScoreSVGD
 from ngboost.learners import default_tree_learner
 from ngboost.manifold import manifold
 from ngboost.scores import LogScore
@@ -398,6 +398,15 @@ class NGBoost:
 
         self.n_features = X.shape[1]
 
+         
+        # --- HOOK #1: only enable leaf‐density when Score is exactly your SVGD class ---
+        if self.Score is NIGLogScoreSVGD:
+            self._needs_leaf_density = True
+            self._X_for_leaf = X
+        else:
+            self._needs_leaf_density = False
+            self._X_for_leaf = None
+
         loss_list = []
         self.fit_init_params_to_marginal(Y)
 
@@ -446,6 +455,18 @@ class NGBoost:
                 grads += noise
 
             proj_grad = self.fit_base(X_batch, grads, weight_batch)
+
+
+            # — HOOK #2: register the leaf‐tree & X with our SVGD score object —
+            if self._needs_leaf_density:
+                # get the Score instance from the Distribution
+                D = self.Manifold(P_batch.T)
+                # store the full training X so score can compute leaf‐volumes
+                D.set_train_data(self._X_for_leaf)
+                # pick the mu‐tree (first model) to define leaves
+                mu_tree = self.base_models[-1][0]
+                D.set_prev_tree(mu_tree)
+
             scale = self.line_search(proj_grad, P_batch, Y_batch, weight_batch)
 
             # Add the model shrinkage rate to regularize the SGLB algorithm (see https://arxiv.org/pdf/2001.07248)
