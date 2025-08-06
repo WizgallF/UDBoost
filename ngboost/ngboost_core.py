@@ -59,7 +59,11 @@ class NGBoost:
         self,
         Dist=Normal,
         Score=LogScore,
-        Base=default_tree_learner,
+        base_criterion="squared_error",
+        alpha=0.0,
+        min_samples_leaf=1,
+        min_samples_split=2,
+        max_depth=6,
         natural_gradient=True,
         n_estimators=500,
         learning_rate=0.01,
@@ -77,7 +81,15 @@ class NGBoost:
     ):
         self.Dist = Dist
         self.Score = Score
-        self.Base = Base
+        self.Base = DecisionTreeRegressor(
+            criterion=base_criterion,
+            max_depth=max_depth,
+            alpha=alpha,
+            random_state=random_state,
+            min_samples_leaf=min_samples_leaf,
+            min_samples_split=min_samples_split,
+
+        )
         self.Manifold = manifold(Score, Dist)
         self.natural_gradient = natural_gradient
         self.n_estimators = n_estimators
@@ -98,7 +110,7 @@ class NGBoost:
         self.early_stopping_rounds = early_stopping_rounds
         self.SGLB = SGLB
         self.langevin_noise_scale = langevin_noise_scale
-
+        self.epistemic_scaling = epistemic_scaling
         if hasattr(self.Dist, "multi_output"):
             self.multi_output = self.Dist.multi_output
         else:
@@ -593,6 +605,7 @@ class NGBoost:
             dist.X_test = X.copy() 
             dist.X_train = self.X_train
             dist.leaf_tree = self.base_models[-1][0]
+            dist.epistemic_scaling = self.epistemic_scaling
         return dist
 
         
