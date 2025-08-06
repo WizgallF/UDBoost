@@ -1,16 +1,16 @@
 "The NGBoost library API"
 # pylint: disable=too-many-arguments
 
-# SKlearn
+# - SKlearn - #
 from sklearn.base import BaseEstimator
 from sklearn.utils import check_array
 from sklearn.utils import resample
 from sklearn.utils import check_random_state
 
-# Numpy
+# - Numpy - #
 import numpy as np
 
-
+# - NGBoost - #
 from ngboost.distns import (
     Bernoulli,
     ClassificationDistn,
@@ -35,33 +35,105 @@ class NGBRegressor(NGBoost, BaseEstimator):
     infinite number of (ordered) values.
 
     Parameters:
-        Dist              : assumed distributional form of Y|X=x.
-                            A distribution from ngboost.distns, e.g. Normal
-        Score             : rule to compare probabilistic predictions P̂ to the observed data y.
-                            A score from ngboost.scores, e.g. LogScore
-        Base              : base learner to use in the boosting algorithm.
-                            Any instantiated sklearn regressor, e.g. DecisionTreeRegressor()
-        natural_gradient  : logical flag indicating whether the natural gradient should be used
-        n_estimators      : the number of boosting iterations to fit
-        learning_rate     : the learning rate
-        minibatch_frac    : the percent subsample of rows to use in each boosting iteration
-        col_sample        : the percent subsample of columns to use in each boosting iteration
-        verbose           : flag indicating whether output should be printed during fitting
-        verbose_eval      : increment (in boosting iterations) at which output should be printed
-        tol               : numerical tolerance to be used in optimization
-        random_state      : seed for reproducibility. See
-                            https://stackoverflow.com/questions/28064634/random-state-pseudo-random-number-in-scikit-learn
-        validation_fraction: Proportion of training data to set
-                             aside as validation data for early stopping.
-        early_stopping_rounds:      The number of consecutive boosting iterations during which the
-                                    loss has to increase before the algorithm stops early.
-                                    Set to None to disable early stopping and validation.
-                                    None enables running over the full data set.
-        SGLB                   : whether to use Stochastic Gradient Langevin Boosting (SGLB) or not.
-        langevin_noise_scale: the scale of the Langevin noise to add during training (only used if SGLB=True)
+        Dist : ngboost.distns
+            Assumed distributional form of Y|X=x, e.g. `Normal`.
+
+        Score : ngboost.scores
+            Rule to compare probabilistic predictions Ŷ to the observed data y, e.g. `LogScore`.
+
+        base_criterion : str, default="friedman_mse"
+            Loss used to evaluate splits in the base learner.
+            Options include `"squared_error"`, `"friedman_mse"`, `"absolute_error"`, `"poisson"`.
+
+        splitter : {"best", "random"}, default="best"
+            Strategy used to choose the split at each node.
+
+        alpha : float, default=0.0
+            Complexity-pruning parameter (ccp_alpha) for the base trees.
+
+        min_samples_leaf : int or float, default=1
+            Minimum number (or fraction) of samples required to be at a leaf node.
+
+        min_samples_split : int or float, default=2
+            Minimum number (or fraction) of samples required to split an internal node.
+
+        max_depth : int, default=6
+            Maximum depth of the individual regression estimators.
+
+        min_weight_fraction_leaf : float, default=0.0
+            Minimum weighted fraction of the sum total of weights required to be at a leaf node.
+
+        max_features : int, float, {"sqrt", "log2"} or None, default=None
+            Number of features to consider when looking for the best split.
+
+        max_leaf_nodes : int or None, default=None
+            Grow trees with `max_leaf_nodes` in best-first fashion if not None.
+
+        min_impurity_decrease : float, default=0.0
+            A node will be split if this split induces a decrease of the impurity
+            greater than or equal to this value.
+
+        monotone_cst : array-like of shape (n_features,) or None, default=None
+            Monotonicity constraints per feature: 1 for increasing,
+            -1 for decreasing, 0 for no constraint.
+
+        natural_gradient : bool, default=True
+            Whether to use the natural gradient in the boosting updates.
+
+        n_estimators : int, default=500
+            The number of boosting iterations to fit.
+
+        learning_rate : float, default=0.01
+            Learning rate that shrinks the contribution of each learner.
+
+        minibatch_frac : float, default=1.0
+            Fraction of samples to subsample for each boosting iteration.
+
+        col_sample : float, default=1.0
+            Fraction of features to subsample for each boosting iteration.
+
+        verbose : bool, default=True
+            Whether to print progress messages during fitting.
+
+        verbose_eval : int, default=100
+            Print evaluation metrics at every `verbose_eval` iterations.
+
+        tol : float, default=1e-4
+            Numerical tolerance for early stopping criterion.
+
+        random_state : int, RandomState instance or None, default=None
+            Controls the random seed for reproducibility.
+
+        validation_fraction : float, default=0.1
+            Fraction of training data to set aside as validation set for early stopping.
+
+        early_stopping_rounds : int or None, default=None
+            Number of consecutive iterations with no improvement to trigger early stopping.
+            Set to None to disable early stopping.
+
+        SGLB : bool, default=False
+            Whether to use Stochastic Gradient Langevin Boosting (SGLB).
+
+        langevin_noise_scale : float, default=1
+            Scale of the Langevin noise added during training (only if `SGLB=True`).
+
+        metadistribution_method : str or None, default=None
+            The method to use for the metadistribution.
+            Options include:
+                - "ensemble_SGLB"
+                - "virtual_SGLB"
+                - "SGB"
+                - "evidential_regression"
+                - "bagging"
+                - "KGB"
+                - None (no metadistribution)
+
+        epistemic_scaling : bool, default=False
+            Whether to apply additional scaling to the epistemic (model) uncertainty estimates.
 
     Output:
-        An NGBRegressor object that can be fit.
+        An NGBRegressor object or an NGBoost ensemble that can be fit using .fit(X, y)
+        and used to predict distributions, means, variances, etc.
     """
 
     # pylint: disable=too-many-positional-arguments
@@ -69,7 +141,7 @@ class NGBRegressor(NGBoost, BaseEstimator):
         self,
         Dist=Normal,
         Score=LogScore,
-        base_criterion="squared_error",
+        base_criterion="friedman_mse",
         splitter='best',
         alpha=0.0,
         min_samples_leaf=1,
@@ -93,7 +165,11 @@ class NGBRegressor(NGBoost, BaseEstimator):
         early_stopping_rounds=None,
         SGLB=False,
         langevin_noise_scale=1,
+        metadistribution_method=None,
+        epistemic_scaling=None,
     ):
+        
+        # --- Tests --- #
         assert issubclass(
             Dist, RegressionDistn
         ), f"{Dist.__name__} is not useable for regression."
@@ -102,37 +178,43 @@ class NGBRegressor(NGBoost, BaseEstimator):
             Dist, "scores"
         ):  # user is trying to use a dist that only has censored scores implemented
             Dist = Dist.uncensor(Score)
+        # ------------- #
 
-        super().__init__(
-            Dist,
-            Score,
-            base_criterion,
-            splitter,
-            alpha,
-            min_samples_leaf,
-            min_samples_split,
-            max_depth,
-            min_weight_fraction_leaf,
-            max_features,
-            max_leaf_nodes,
-            min_impurity_decrease,
-            monotone_cst,
-            natural_gradient,
-            n_estimators,
-            learning_rate,
-            minibatch_frac,
-            col_sample,
-            verbose,
-            verbose_eval,
-            tol,
-            random_state,
-            validation_fraction,
-            early_stopping_rounds,
-            SGLB=SGLB,
-            langevin_noise_scale=langevin_noise_scale,
-        )
 
+        # --- Core NGBoost attributes --- #
+        self.Dist = Dist
+        self.Score = Score
+        self.base_criterion = base_criterion
+        self.splitter = splitter
+        self.alpha = alpha
+        self.min_samples_leaf = min_samples_leaf
+        self.min_samples_split = min_samples_split
+        self.max_depth = max_depth
+        self.min_weight_fraction_leaf = min_weight_fraction_leaf
+        self.max_features = max_features
+        self.max_leaf_nodes = max_leaf_nodes
+        self.min_impurity_decrease = min_impurity_decrease
+        self.monotone_cst = monotone_cst
+        self.natural_gradient = natural_gradient
+        self.n_estimators = n_estimators
+        self.learning_rate = learning_rate
+        self.minibatch_frac = minibatch_frac
+        self.col_sample = col_sample
+        self.verbose = verbose
+        self.verbose_eval = verbose_eval
+        self.tol = tol
+        self.random_state = random_state
+        self.validation_fraction = validation_fraction
+        self.early_stopping_rounds = early_stopping_rounds
+        self.SGLB = SGLB
+        self.langevin_noise_scale = langevin_noise_scale
+        self.metadistribution_method = metadistribution_method
+        # ------------- #
+
+        # --- API Attributes --- #
         self._estimator_type = "regressor"
+        self.ensemble_models = []
+
 
     def __getstate__(self):
         state = super().__getstate__()
@@ -146,6 +228,7 @@ class NGBRegressor(NGBoost, BaseEstimator):
         if "uncensor" in state_dict.keys():
             state_dict["Dist"] = state_dict["Dist"].uncensor(state_dict["Score"])
         super().__setstate__(state_dict)
+
 
     def pred_uncertainty(self, X):
         """
@@ -172,6 +255,168 @@ class NGBRegressor(NGBoost, BaseEstimator):
                 "The distribution does not implement pred_uncertainty method."
             )
         return uncertainties
+
+    def fit(self, X, y, X_val=None, y_val=None, **kwargs):
+        """
+        Fits an NGBoost regressor to the data.
+        For additional parameters see ngboost.NGboost.fit
+
+        Parameters:
+            X : DataFrame object or List or numpy array of predictors (n x p) in Numeric format
+            y : DataFrame object or List or numpy array of target values (n) in Numeric format
+            X_val : DataFrame object or List or numpy array of validation-set predictors (n x p) in Numeric format
+            y_val : DataFrame object or List or numpy array of validation-set target values (n) in Numeric format
+
+        Output:
+            self : returns a fitted NGBRegressor object
+        """
+        match self.metadistribution_method:
+            
+            # --- Standard NGBoostRegressor - see https://arxiv.org/pdf/1910.03225 --- #
+            case "None":
+                super().__init__(
+                    **self._core_ngboost_params()
+                )
+                return super().fit(X, y, X_val=X_val, Y_val=y_val, **kwargs)
+            
+            
+            # --- Stochastic Gradient Langevin Boosting (SGLB) - see https://arxiv.org/pdf/2001.07248 --- #
+            case "ensemble_SGLB":
+                # - Tests - #
+                assert self.SGLB == True, "SGLB must be True for ensemble SGLB method."
+                assert self.n_estimators > 1, "n_estimators must be greater than 1 for ensemble SGLB method."
+                # --------- #
+
+                ### TODO ###
+                # - Build carefull logic for the random seed (has to be different for each regressor)
+                # - Enable to combine ensemble SGLB with bagging
+                ### TODO ###
+
+                for i in range(self.n_regressors):
+                    if self.verbose:
+                        print(f"\n Fitting regressor [{i+1}/{self.n_regressors}]")
+
+                    model = NGBoost(
+                        **self._core_ngboost_params(seed=i)
+                    )
+                    model.fit(X, y, **kwargs)
+                    self.ensemble_models.append(model)
+
+
+            # --- Stochastic Gradient Langevin Boosting (SGLB) - see https://arxiv.org/pdf/2006.10562 --- #
+            case "virtual_SGLB":
+                # - Tests - #
+                assert self.SGLB == True, "SGLB must be True for virtual SGLB method."
+                assert self.n_estimators > 1, "n_estimators must be greater than 1 for virtual SGLB method."
+                # --------- #
+
+                model = NGBoost(
+                    **self._core_ngboost_params()
+                )
+                model.fit(X, y, **kwargs)
+
+
+            # --- Stochastic Gradient Boosting (SGB) - see <INSERT PAPER LINK> --- #
+            case "SGB":
+                # - Tests - #
+                assert self.n_estimators > 1, "n_estimators must be greater than 1 for ensemble SGLB method."
+                # --------- #
+
+                ### TODO ###
+                # - Build carefull logic for the random seed (has to be different for each regressor)
+                # - Enable to combine SGB with bagging
+                ### TODO ###
+
+                for i in range(self.n_regressors):
+                    if self.verbose:
+                        print(f"\n Fitting regressor [{i+1}/{self.n_regressors}]")
+
+                    model = NGBoost(
+                        **self._core_ngboost_params(seed=i)
+                    )
+                    model.fit(X, y, **kwargs)
+                    self.ensemble_models.append(model)
+
+
+            # --- Kernel Gradient Boosting (KGB) - see https://openreview.net/pdf?id=3VKiaagxw1S --- #
+            case "KGB":
+                raise NotImplementedError("KGB ensemble fitting logic is not yet implemented.")
+            
+
+            # --- Evidential Regression for Tree Boosting - see <INSERT PAPER LINK> --- #
+            case "evidential_regression":
+                # - Tests - #
+                assert hasattr(self.Dist, "pred_uncertainty") & self.Dist.is_EDL == True, "The distribution does not implement pred_uncertainty method."
+                # --------- #
+
+                model = NGBoost(
+                    **self._core_ngboost_params()
+                )
+                model.fit(X, y, **kwargs)
+
+            # --- Building an ensemble using bootstrap aggregation (bagging) - see <INSERT PAPER LINK> --- #
+            case "bagging":
+                # - Tests - #
+                assert self.n_estimators > 1, "n_estimators must be greater than 1 for bagging method."
+                assert self.bagging_frac > 0 & self.bagging_frac < 1, "bagging_frac must be greater than 0 and less than 1 for bagging method."
+                # --------- #
+
+                ### TODO ###
+                ### Build carefull logic for the random seed (has to be different for each regressor)
+                ### TODO ###
+
+                for i in range(self.n_regressors):
+                    if self.verbose:
+                        print(f"\n Fitting regressor [{i+1}/{self.n_regressors}]")
+
+                    # Use a subsample of the data for bagging
+                    X_resampled, y_resampled = resample(
+                        X, y,
+                        replace=False,  # subsample without replacement
+                        n_samples=int(len(X) * self.bagging_frac),  # fraction of data
+                        random_state=self.random_state
+                    )
+                    model = NGBoost(
+                        **self._core_ngboost_params(seed=i)
+                    )
+                    model.fit(X_resampled, y_resampled, **kwargs)
+                    self.ensemble_models.append(model)
+            case _:
+                raise ValueError(f"Unknown metadistribution method: {self.metadistribution_method}")
+
+    def _core_ngboost_params(self, seed: int = None):
+        params = {
+            "Dist": self.Dist,
+            "Score": self.Score,
+            "base_criterion": self.base_criterion,
+            "splitter": self.splitter,
+            "alpha": self.alpha,
+            "min_samples_leaf": self.min_samples_leaf,
+            "min_samples_split": self.min_samples_split,
+            "max_depth": self.max_depth,
+            "min_weight_fraction_leaf": self.min_weight_fraction_leaf,
+            "max_features": self.max_features,
+            "max_leaf_nodes": self.max_leaf_nodes,
+            "min_impurity_decrease": self.min_impurity_decrease,
+            "monotone_cst": self.monotone_cst,
+            "natural_gradient": self.natural_gradient,
+            "n_estimators": self.n_estimators,
+            "learning_rate": self.learning_rate,
+            "minibatch_frac": self.minibatch_frac,
+            "col_sample": self.col_sample,
+            "verbose": self.verbose,
+            "verbose_eval": self.verbose_eval,
+            "tol": self.tol,
+            "random_state": seed if seed is not None else self.random_state,
+            "validation_fraction": self.validation_fraction,
+            "early_stopping_rounds": self.early_stopping_rounds,
+            "SGLB": self.SGLB,
+            "langevin_noise_scale": self.langevin_noise_scale,
+            "epistemic_scaling": self.epistemic_scaling,
+        }
+        return params
+    
+
 
 class NGBClassifier(NGBoost, BaseEstimator):
     """
@@ -386,8 +631,6 @@ class NGBSurvival(NGBoost, BaseEstimator):
             Y_val=Y_from_censored(T_val, E_val),
             **kwargs,
         )
-
-
 
 class NGBEnsembleRegressor(NGBoost, BaseEstimator):
     """

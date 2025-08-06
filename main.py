@@ -78,6 +78,8 @@ dataset.plot_1d_syn_benchmark(show=True)
 # --- Training and evaluating the NGBRegressor on both datasets --- #
 # - Change your regressor here - #
 BaseLearner = DecisionTreeRegressor(max_depth=3, min_samples_leaf=10, ccp_alpha=0.005)
+
+
 regressor = NGBEnsembleRegressor(Base=BaseLearner, n_regressors=20, n_estimators=500, ensemble_method='virtual_SGBL', learning_rate=0.01, bagging_frac=0.75)
 
 # - Fit the regressor on the dataset - #
