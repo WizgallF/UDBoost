@@ -60,10 +60,16 @@ class NGBoost:
         Dist=Normal,
         Score=LogScore,
         base_criterion="squared_error",
+        splitter='best',
         alpha=0.0,
         min_samples_leaf=1,
         min_samples_split=2,
         max_depth=6,
+        min_weight_fraction_leaf=0.0,
+        max_features=None,
+        max_leaf_nodes=None,
+        min_impurity_decrease=0.0,
+        monotone_cst=None,
         natural_gradient=True,
         n_estimators=500,
         learning_rate=0.01,
@@ -83,11 +89,17 @@ class NGBoost:
         self.Score = Score
         self.Base = DecisionTreeRegressor(
             criterion=base_criterion,
+            splitter=splitter,
             max_depth=max_depth,
-            alpha=alpha,
+            ccp_alpha=alpha,
             random_state=random_state,
             min_samples_leaf=min_samples_leaf,
             min_samples_split=min_samples_split,
+            min_weight_fraction_leaf=min_weight_fraction_leaf,
+            max_features=max_features,
+            max_leaf_nodes=max_leaf_nodes,
+            min_impurity_decrease=min_impurity_decrease,
+            monotone_cst=monotone_cst,
 
         )
         self.Manifold = manifold(Score, Dist)
