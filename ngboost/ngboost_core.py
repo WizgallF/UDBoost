@@ -24,35 +24,100 @@ class NGBoost:
     Unless you are implementing a new kind of regression (e.g. interval-censored, etc.),
     you should probably use one of NGBRegressor, NGBClassifier, or NGBSurvival.
 
-    Parameters:
-        Dist              : assumed distributional form of Y|X=x.
-                            A distribution from ngboost.distns, e.g. Normal
-        Score             : rule to compare probabilistic predictions P̂ to the observed data y.
-                            A score from ngboost.scores, e.g. LogScore
-        Base              : base learner to use in the boosting algorithm.
-                            Any instantiated sklearn regressor, e.g. DecisionTreeRegressor()
-        natural_gradient  : logical flag indicating whether the natural gradient should be used
-        n_estimators      : the number of boosting iterations to fit
-        learning_rate     : the learning rate
-        minibatch_frac    : the percent subsample of rows to use in each boosting iteration
-        col_sample        : the percent subsample of columns to use in each boosting iteration
-        verbose           : flag indicating whether output should be printed during fitting
-        verbose_eval      : increment (in boosting iterations) at which output should be printed
-        tol               : numerical tolerance to be used in optimization
-        random_state      : seed for reproducibility.
-                            See https://stackoverflow.com/questions/28064634/random-state-pseudo-random-number-in-scikit-learn
-        validation_fraction: Proportion of training data to set aside as validation data for early stopping.
-        early_stopping_rounds: The number of consecutive boosting iterations during which the
-                                    loss has to increase before the algorithm stops early.
-                                    Set to None to disable early stopping and validation.
-                                    None enables running over the full data set.
-        SGLB             : whether to use Stochastic Gradient Langevin Boosting (SGLB) or not.
-        langevin_noise_scale: the scale of the Langevin noise to add during training (only used if SGLB=True)
+    Parameters
+    ----------
+    Dist : ngboost.distns
+        Assumed distributional form of Y|X=x, e.g. `Normal`.
 
+    Score : ngboost.scores
+        Rule to compare probabilistic predictions Ŷ to the observed data y, e.g. `LogScore`.
 
-    Output:
-        An NGBRegressor object that can be fit.
+    base_criterion : str, default="squared_error"
+        Loss used to evaluate splits in the base learner.
+        Options include `"squared_error"`, `"friedman_mse"`, `"absolute_error"`, `"poisson"`.
+
+    splitter : {"best", "random"}, default="best"
+        Strategy used to choose the split at each node.
+
+    alpha : float, default=0.0
+        Complexity-pruning parameter for the base trees.
+
+    min_samples_leaf : int or float, default=1
+        Minimum number (or fraction) of samples required to be at a leaf node.
+
+    min_samples_split : int or float, default=2
+        Minimum number (or fraction) of samples required to split an internal node.
+
+    max_depth : int, default=6
+        Maximum depth of the individual regression estimators.
+
+    min_weight_fraction_leaf : float, default=0.0
+        Minimum weighted fraction of the sum total of weights required to be at a leaf node.
+
+    max_features : int, float, {"sqrt", "log2"} or None, default=None
+        Number of features to consider when looking for the best split.
+
+    max_leaf_nodes : int or None, default=None
+        Grow trees with `max_leaf_nodes` in best-first fashion if not None.
+
+    min_impurity_decrease : float, default=0.0
+        A node will be split if this split induces a decrease of the impurity
+        greater than or equal to this value.
+
+    monotone_cst : array-like of shape (n_features,) or None, default=None
+        Monotonicity constraints per feature: 1 for increasing,
+        -1 for decreasing, 0 for no constraint.
+
+    natural_gradient : bool, default=True
+        Whether to use the natural gradient in the boosting updates.
+
+    n_estimators : int, default=500
+        The number of boosting iterations to fit.
+
+    learning_rate : float, default=0.01
+        Learning rate that shrinks the contribution of each learner.
+
+    minibatch_frac : float, default=1.0
+        Fraction of samples to subsample for each boosting iteration.
+
+    col_sample : float, default=1.0
+        Fraction of features to subsample for each boosting iteration.
+
+    verbose : bool, default=True
+        Whether to print progress messages during fitting.
+
+    verbose_eval : int, default=100
+        Print evaluation metrics at every `verbose_eval` iterations.
+
+    tol : float, default=1e-4
+        Numerical tolerance for early stopping criterion.
+
+    random_state : int, RandomState instance or None, default=None
+        Controls the random seed for reproducibility.
+
+    validation_fraction : float, default=0.1
+        Fraction of training data to set aside as validation set for early stopping.
+
+    early_stopping_rounds : int or None, default=None
+        Number of consecutive iterations with no improvement to trigger early stopping.
+        Set to None to disable early stopping.
+
+    SGLB : bool, default=False
+        Whether to use Stochastic Gradient Langevin Boosting (SGLB).
+
+    langevin_noise_scale : float, default=1
+        Scale of the Langevin noise added during training (only if `SGLB=True`).
+
+    epistemic_scaling : bool, default=False
+        Whether to apply an additional scaling factor to the epistemic component of uncertainty.
+
+    Returns
+    -------
+    self : object
+        An instance of the NGBoost model, ready to `.fit()`.
     """
+
+
 
     # pylint: disable=too-many-positional-arguments
     def __init__(
@@ -100,7 +165,6 @@ class NGBoost:
             max_leaf_nodes=max_leaf_nodes,
             min_impurity_decrease=min_impurity_decrease,
             monotone_cst=monotone_cst,
-
         )
         self.Manifold = manifold(Score, Dist)
         self.natural_gradient = natural_gradient
