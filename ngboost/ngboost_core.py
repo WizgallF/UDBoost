@@ -64,10 +64,6 @@ class NGBoost:
         A node will be split if this split induces a decrease of the impurity
         greater than or equal to this value.
 
-    monotone_cst : array-like of shape (n_features,) or None, default=None
-        Monotonicity constraints per feature: 1 for increasing,
-        -1 for decreasing, 0 for no constraint.
-
     natural_gradient : bool, default=True
         Whether to use the natural gradient in the boosting updates.
 
@@ -134,7 +130,6 @@ class NGBoost:
         max_features=None,
         max_leaf_nodes=None,
         min_impurity_decrease=0.0,
-        monotone_cst=None,
         natural_gradient=True,
         n_estimators=500,
         learning_rate=0.01,
@@ -163,8 +158,7 @@ class NGBoost:
             min_weight_fraction_leaf=min_weight_fraction_leaf,
             max_features=max_features,
             max_leaf_nodes=max_leaf_nodes,
-            min_impurity_decrease=min_impurity_decrease,
-            monotone_cst=monotone_cst,
+            min_impurity_decrease=min_impurity_decrease
         )
         self.Manifold = manifold(Score, Dist)
         self.natural_gradient = natural_gradient

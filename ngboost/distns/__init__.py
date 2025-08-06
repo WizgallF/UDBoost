@@ -37,5 +37,5 @@ __all__ = [
     "Weibull",
     "NormalInverseGamma",
     "NIGLogScore",
-    "NIGLogScoreSVGD",
+    "NIGLogScoreSVGD"
 ]

@@ -209,6 +209,7 @@ class NGBRegressor(NGBoost, BaseEstimator):
         self.SGLB = SGLB
         self.langevin_noise_scale = langevin_noise_scale
         self.metadistribution_method = metadistribution_method
+        self.epistemic_scaling = epistemic_scaling
         # ------------- #
 
         # --- API Attributes --- #
@@ -346,7 +347,7 @@ class NGBRegressor(NGBoost, BaseEstimator):
             # --- Evidential Regression for Tree Boosting - see <INSERT PAPER LINK> --- #
             case "evidential_regression":
                 # - Tests - #
-                assert hasattr(self.Dist, "pred_uncertainty") & self.Dist.is_EDL == True, "The distribution does not implement pred_uncertainty method."
+                assert hasattr(self.Dist, "pred_uncertainty") & (self.metadistribution_method == "evidential_regression"), "The distribution does not implement pred_uncertainty method."
                 # --------- #
 
                 model = NGBoost(
@@ -398,7 +399,6 @@ class NGBRegressor(NGBoost, BaseEstimator):
             "max_features": self.max_features,
             "max_leaf_nodes": self.max_leaf_nodes,
             "min_impurity_decrease": self.min_impurity_decrease,
-            "monotone_cst": self.monotone_cst,
             "natural_gradient": self.natural_gradient,
             "n_estimators": self.n_estimators,
             "learning_rate": self.learning_rate,
