@@ -8,11 +8,11 @@ from .nig_jit import (
     d_score_numba,
     full_score_numba,
     compute_diag_fim,
-    rbf_kernel_and_grad_numba,
-    leaf_volume_density_vec,
 )
+from .utils import rbf_kernel_and_grad_numba, leaf_volume_density_vec
+
 import line_profiler
-from sklearn.neighbors import NearestNeighbors
+
 
 def softplus(x):
     """
@@ -252,9 +252,9 @@ class NIGLogScoreSVGD(LogScore):
     lower_bound = None
     upper_bound = None
     evid_strength = 0.1
-    kl_strength = 0.1
-    length_scale = 0.1
-    warmup = 5
+    kl_strength = 0.05
+    length_scale = 0.01
+    warmup = 50
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -686,73 +686,3 @@ class NormalInverseGamma(RegressionDistn):
 
         return log_prob
     
-class NormalInverseGammaLeafOOD(NormalInverseGamma):
-    """
-    Same as NormalInverseGamma but at predict-time we down-weight
-    the epistemic variance by 1/sqrt(leaf_volume_density) so that
-    points in sparse leaves get larger uncertainty.
-    """
-
-    def __init__(self, params, *, leaf_tree=None, X_train=None, X_test=None):
-        # call the base ctor (builds mu, lam, alpha, beta)
-        super().__init__(params)
-        # store the tree & the points we’ll predict on
-        self.leaf_tree = leaf_tree
-        self.X_train  = X_train
-        self.X_test   = X_test
-        
-    def pred_uncertainty(self):
-        aleatoric = self.beta / (self.alpha - 1)           # shape (n_test,)
-        epistemic = self.beta / (self.lam * (self.alpha - 1))
-        pred_var  = aleatoric + epistemic
-
-        if self.leaf_tree is not None and self.X_train is not None and self.X_test is not None:
-            eps = 1e-12
-
-            # 1) leaf‐volume weight
-            p_hat = leaf_volume_density_vec(self.leaf_tree, self.X_test)
-            w_vol = np.log(p_hat + eps) * 0.1
-
-  
-            # Find k nearest neighbors of each X_test in X_train
-            k = min(10, self.X_train.shape[0])  # choose k, e.g., 10 or less if not enough samples
-            nbrs = NearestNeighbors(n_neighbors=k, algorithm='auto').fit(self.X_train)
-            # For each test point, get indices of k nearest neighbors in X_train
-            _, indices = nbrs.kneighbors(self.X_test)
-            # Compute mean of k nearest neighbors for each test point
-            x_train_mean = np.mean(self.X_train[indices], axis=1)  # shape (n_test, d)
-            diffs = self.X_test - x_train_mean               # (n_test, d)
-            # if d>1, you could sum over dims, but here we do per‐row dot diag:
-            # m2[i] = sum_j (diffs[i,j]**2 / aleatoric[i])
-            # which for 1‐D is just (diffs[:,0]**2 / aleatoric)
-            m2 = np.einsum('ij,i->i', diffs**2, 1.0/(aleatoric + eps))
-
-            w_maha = np.exp(-10 * m2)                       # (n_test,)
-
-            # 3) combine
-            w_comb = w_vol * w_maha
-
-            # 4) inflate λ for low‐weight points
-            self.lam = self.lam * (1.0/(w_comb + eps))
-
-            # 5) recompute uncertainties
-            aleatoric = self.beta / (self.alpha - 1)
-            epistemic = self.beta / (self.lam * (self.alpha - 1))
-            pred_var  = aleatoric + epistemic
-
-        return {
-            "mean":       self.mu,
-            "aleatoric":  aleatoric,
-            "epistemic":  epistemic,
-            "predictive": pred_var
-        }
-
-            
-
-    def predict_variance(self, X):
-        """
-        NGBoost’s sklearn‐API calls this for var estimates;
-        we stash X so pred_uncertainty can see it.
-        """
-        self.X_query = X
-        return self.pred_uncertainty()["predictive"]
