@@ -216,7 +216,7 @@ class NGBoost:
 
     def pred_param(self, X, max_iter=None):
         m, n = X.shape
-        params = np.ones((m, self.Manifold.n_params)) * self.init_params
+        params = np.ones((m, self.Dist.n_params)) * self.init_params
         for i, (models, s, col_idx) in enumerate(
             zip(self.base_models, self.scalings, self.col_idxs)
         ):
