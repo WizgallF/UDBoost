@@ -144,11 +144,14 @@ class NGBRegressor(NGBoost, BaseEstimator):
         """
         dist = self.pred_dist(X)
         if hasattr(self.Dist, "pred_uncertainty") & dist.is_EDL == True:
-            return dist.pred_uncertainty()    
+            uncertainties = dist.pred_uncertainty()
+        if dist.epistemic_scaling is not None and dist.epistemic_scaling:
+            uncertainties = dist.epistemic_scaling(dist, knn=10)
         else:
             raise NotImplementedError(
                 "The distribution does not implement pred_uncertainty method."
             )
+        return uncertainties
 
 class NGBClassifier(NGBoost, BaseEstimator):
     """

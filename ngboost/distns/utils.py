@@ -144,7 +144,7 @@ def leaf_volume_density_vec(tree, X):
 
     return p_hat
 
-def epistemic_scaling(Dist, uncertainties: dict = None):
+def epistemic_scaling(Dist, knn=10):
     """
     Scales the epistemic uncertainty of a distribution to the range [0, 1].
 
@@ -155,6 +155,7 @@ def epistemic_scaling(Dist, uncertainties: dict = None):
     Returns:
         Scaled uncertainties.
     """
+    uncertainties = Dist.pred_uncertainty()
     epistemic = uncertainties["epistemic"]
     aleatoric = uncertainties["aleatoric"]
     X_test = Dist.X_test
@@ -168,7 +169,7 @@ def epistemic_scaling(Dist, uncertainties: dict = None):
         w_vol = np.log(p_hat + eps) * 0.1
 
         # Find k nearest neighbors of each X_test in X_train
-        k = min(10, X_train.shape[0])  # choose k, e.g., 10 or less if not enough samples
+        k = min(knn, X_train.shape[0])  # choose k, e.g., 10 or less if not enough samples
         nbrs = NearestNeighbors(n_neighbors=k, algorithm='auto').fit(X_train)
         # For each test point, get indices of k nearest neighbors in X_train
         _, indices = nbrs.kneighbors(X_test)
