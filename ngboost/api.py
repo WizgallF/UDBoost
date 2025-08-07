@@ -457,10 +457,10 @@ class NGBRegressor(NGBoost, BaseEstimator):
                 assert hasattr(self.Dist, "pred_uncertainty") & (self.metadistribution_method == "evidential_regression"), "The distribution does not implement pred_uncertainty method."
                 # --------- #
 
-                model = NGBoost(
+                super().__init__(
                     **self._core_ngboost_params()
                 )
-                model.fit(X, y, **kwargs)
+                return super().fit(X, y, X_val=X_val, Y_val=y_val, **kwargs)
 
             # --- Building an ensemble using bootstrap aggregation (bagging) - see <INSERT PAPER LINK> --- #
             case "bagging":
