@@ -189,7 +189,7 @@ class NGBoost:
     def __getstate__(self):
         state = self.__dict__.copy()
         # Remove the unpicklable entries.
-        del state["Manifold"]
+        state.pop("Manifold", None)
         state["Dist_name"] = self.Dist.__name__
         if self.Dist.__name__ == "Categorical": 
             del state["Dist"]
@@ -632,23 +632,36 @@ class NGBoost:
         deep : Ignored. (for compatibility with sklearn)
         Returns
         ----------
-        params : returns an dictionary of parameters.
+        params : returns a dictionary of parameters.
         """
         params = {
             "Dist": self.Dist,
             "Score": self.Score,
-            "Base": self.Base,
+            "base_criterion": self.base_criterion,
+            "splitter": self.splitter,
+            "alpha": self.alpha,
+            "min_samples_leaf": self.min_samples_leaf,
+            "min_samples_split": self.min_samples_split,
+            "max_depth": self.max_depth,
+            "min_weight_fraction_leaf": self.min_weight_fraction_leaf,
+            "max_features": self.max_features,
+            "max_leaf_nodes": self.max_leaf_nodes,
+            "min_impurity_decrease": self.min_impurity_decrease,
             "natural_gradient": self.natural_gradient,
             "n_estimators": self.n_estimators,
             "learning_rate": self.learning_rate,
             "minibatch_frac": self.minibatch_frac,
             "col_sample": self.col_sample,
             "verbose": self.verbose,
+            "verbose_eval": self.verbose_eval,
+            "tol": self.tol,
             "random_state": self.random_state,
             "validation_fraction": self.validation_fraction,
             "early_stopping_rounds": self.early_stopping_rounds,
+            "SGLB": self.SGLB,
+            "langevin_noise_scale": self.langevin_noise_scale,
+            "epistemic_scaling": self.epistemic_scaling,
         }
-
         return params
 
     def score(self, X, Y):  # for sklearn

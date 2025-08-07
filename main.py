@@ -10,7 +10,8 @@ from benchmark.benchmark import BenchmarkUncertainty
 
 # - SKLearn imports - #
 from sklearn.tree import DecisionTreeRegressor
-
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import RandomizedSearchCV
 
 # Catboost for comparison
 from catboost import CatBoostRegressor
@@ -79,12 +80,50 @@ dataset.plot_1d_syn_benchmark(show=False)
 # - Change your regressor here - #
 
 
-regressor = NGBRegressor(n_regressors=10, metadistribution_method='bagging', SGLB=False, n_estimators=200, min_samples_leaf=5, max_depth=3, bagging_frac=0.7)
+# Define base regressor with fixed parameters
+base_regressor = NGBRegressor(
+    metadistribution_method='None',
+    SGLB=False,
+    verbose=False  # Reduce logging output
+)
 
+# Define hyperparameter search space
+param_dist = {
+    'n_estimators': [100, 200, 300, 500, 1000],
+    'min_samples_leaf': [2, 5, 10, 20],
+    'max_depth': [2, 3, 4, 5],
+    'learning_rate': [0.005, 0.01, 0.05, 0.1],
+    'min_impurity_decrease': [0.0, 0.01, 0.1],
+}
+
+# Setup RandomizedSearchCV
+random_search = RandomizedSearchCV(
+    estimator=base_regressor,
+    param_distributions=param_dist,
+    n_iter=10,
+    scoring='neg_mean_squared_error',
+    cv=3,
+    verbose=1,
+    n_jobs=-1,
+    random_state=42
+)
+# Fit the model with hyperparameter optimization
+random_search.fit(dataset.X.reshape(-1, 1), dataset.y)
+
+# Get best parameters
+best_params = random_search.best_params_
+print("Best parameters found: ", best_params)
+
+# Fit an ensemble using best parameters
+ensemble_model = NGBRegressor(metadistribution_method='bagging', n_regressors=10, **best_params, bagging_frac=0.75, verbose=False)
+ensemble_model.fit(dataset.X.reshape(-1, 1), dataset.y)
+
+# Use ensemble_model as best_model for further evaluation
+best_model = ensemble_model
 # - Fit the regressor on the dataset - #
-regressor.fit(dataset.X.reshape(-1, 1), dataset.y)
-uncertainty_levi = regressor.pred_uncertainty(dataset.dataspace.reshape(-1, 1), mode='bayesian_kl')
-uncertainty_levi['epistemic'] = uncertainty_levi['epistemic'] * 100 # Scale epistemic uncertainty for better visualization
+best_model.fit(dataset.X.reshape(-1, 1), dataset.y)
+uncertainty_levi = best_model.pred_uncertainty(dataset.dataspace.reshape(-1, 1), mode='bayesian_kl')
+uncertainty_levi['epistemic'] = uncertainty_levi['epistemic'] # Scale epistemic uncertainty for better visualization
 
 # --- Benchmarking the uncertainty quantification methods --- #
 benchmark = BenchmarkUncertainty()

@@ -229,16 +229,27 @@ class NGBRegressor(NGBoost, BaseEstimator):
 
     def __getstate__(self):
         state = super().__getstate__()
-        # Remove the unpicklable entries.
-        if self.Dist.__name__ == "DistWithUncensoredScore":
-            state["Dist"] = self.Dist.__base__
+
+        # Handle DistWithUncensoredScore safely
+        if hasattr(self, "Dist") and getattr(self.Dist, "__name__", "") == "DistWithUncensoredScore":
+            # Replace with base class for pickling
+            state["Dist"] = getattr(self.Dist, "__base__", self.Dist)
             state["uncensor"] = True
+
+        # Optionally remove unpicklable fields safely
+        for key in ["Manifold", "some_other_unpicklable_field"]:
+            state.pop(key, None)  # Remove if present, skip if not
+
         return state
 
+
     def __setstate__(self, state_dict):
-        if "uncensor" in state_dict.keys():
-            state_dict["Dist"] = state_dict["Dist"].uncensor(state_dict["Score"])
+        if "uncensor" in state_dict:
+            if hasattr(state_dict["Dist"], "uncensor"):
+                state_dict["Dist"] = state_dict["Dist"].uncensor(state_dict["Score"])
+            del state_dict["uncensor"]  # Clean up after use
         super().__setstate__(state_dict)
+
 
 
     def pred_uncertainty(self, X, mode: str = 'bayesian_kl'):
@@ -385,7 +396,7 @@ class NGBRegressor(NGBoost, BaseEstimator):
         match self.metadistribution_method:
             
             # --- Standard NGBoostRegressor - see https://arxiv.org/pdf/1910.03225 --- #
-            case "None":
+            case None | "None":
                 super().__init__(
                     **self._core_ngboost_params()
                 )
