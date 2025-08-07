@@ -117,6 +117,9 @@ class NGBRegressor(NGBoost, BaseEstimator):
         langevin_noise_scale : float, default=1
             Scale of the Langevin noise added during training (only if `SGLB=True`).
 
+        n_regressors : int, default=1
+            The number of base regressors to use in the ensemble.
+
         metadistribution_method : str or None, default=None
             The method to use for the metadistribution.
             Options include:
@@ -127,6 +130,9 @@ class NGBRegressor(NGBoost, BaseEstimator):
                 - "bagging"
                 - "KGB"
                 - None (no metadistribution)
+
+        bagging_frac : float, default=1.0
+            The fraction of samples to use for bagging (subsampling) in the ensemble.
 
         epistemic_scaling : bool, default=False
             Whether to apply additional scaling to the epistemic (model) uncertainty estimates.
@@ -156,6 +162,7 @@ class NGBRegressor(NGBoost, BaseEstimator):
         n_estimators=500,
         learning_rate=0.01,
         minibatch_frac=1.0,
+        bagging_frac=1.0,
         col_sample=1.0,
         verbose=True,
         verbose_eval=100,
@@ -165,6 +172,7 @@ class NGBRegressor(NGBoost, BaseEstimator):
         early_stopping_rounds=None,
         SGLB=False,
         langevin_noise_scale=1,
+        n_regressors=1,
         metadistribution_method=None,
         epistemic_scaling=None,
     ):
@@ -199,6 +207,7 @@ class NGBRegressor(NGBoost, BaseEstimator):
         self.n_estimators = n_estimators
         self.learning_rate = learning_rate
         self.minibatch_frac = minibatch_frac
+        self.bagging_frac = bagging_frac
         self.col_sample = col_sample
         self.verbose = verbose
         self.verbose_eval = verbose_eval
@@ -215,6 +224,7 @@ class NGBRegressor(NGBoost, BaseEstimator):
         # --- API Attributes --- #
         self._estimator_type = "regressor"
         self.ensemble_models = []
+        self.n_regressors = n_regressors
 
 
     def __getstate__(self):
@@ -231,31 +241,127 @@ class NGBRegressor(NGBoost, BaseEstimator):
         super().__setstate__(state_dict)
 
 
-    def pred_uncertainty(self, X):
+    def pred_uncertainty(self, X, mode: str = 'bayesian_kl'):
         """
-        Predict the uncertainty of Y at the points X=x
+        Computes predictive, epistemic, and aleatoric uncertainties for NGBoost ensembles.
+        Supports several uncertainty estimation strategies, including distribution-based logic.
 
         Parameters:
-            X : DataFrame object or List or numpy array of predictors (n x p)
-                in numeric format
+            X (array-like): Input data for which to compute uncertainties
+            mode (str): Method used to compute uncertainty. Options:
+                - 'distribution' (uses distribution object logic)
+                - 'bayesian_mean'
+                - 'bayesian_kl'
+                - 'levi_simple'
+                - 'levi_kl'
 
-        Output:
-            A dict of numpy arrays of the uncertainty estimates of Y with keys:
-                "mean": mean of the distribution
-                "aleatoric": aleatoric uncertainty of the distribution
-                "epistemic": epistemic uncertainty of the distribution
-                "predictive": total uncertainty of the distribution
+        Returns:
+            dict: Dictionary containing uncertainty estimates:
+                - mean: Mean prediction across all models or distribution
+                - aleatoric: Aleatoric uncertainty
+                - epistemic: Epistemic uncertainty
+                - predictive: Total uncertainty (aleatoric + epistemic)
+                - aleatoric_lower_bound: Lower aleatoric bound (if applicable)
+                - aleatoric_upper_bound: Upper aleatoric bound (if applicable)
+                - predictive_lower_bound: Lower total uncertainty (if applicable)
+                - predictive_upper_bound: Upper total uncertainty (if applicable)
         """
-        dist = self.pred_dist(X)
-        if hasattr(self.Dist, "pred_uncertainty") & dist.is_EDL == True:
-            uncertainties = dist.pred_uncertainty()
-        if dist.epistemic_scaling is not None and dist.epistemic_scaling:
-            uncertainties = dist.epistemic_scaling(dist, knn=10)
-        else:
-            raise NotImplementedError(
-                "The distribution does not implement pred_uncertainty method."
+        if self.metadistribution_method == 'evidential_regression':
+            dist = self.pred_dist(X)
+            if hasattr(self.Dist, "pred_uncertainty") and getattr(dist, "is_EDL", False):
+                return dist.pred_uncertainty()
+            elif getattr(dist, "epistemic_scaling", None):
+                return dist.epistemic_scaling(dist, knn=10)
+            else:
+                raise NotImplementedError(
+                    "The distribution does not implement a compatible pred_uncertainty method."
+                )
+
+        # --- Ensemble-based Uncertainty Estimation --- #
+        if self.metadistribution_method == "virtual_SGBL":
+            staged_predictions = self.ensemble_models[0].staged_pred_dist(X)
+            indices = np.linspace(
+                len(staged_predictions) // 2,
+                len(staged_predictions) - 1,
+                self.n_regressors,
+                dtype=int
             )
-        return uncertainties
+            parameters = np.array([staged_predictions[i].params for i in indices])
+        else:
+            parameters = np.array([model.pred_dist(X).params for model in self.ensemble_models])
+
+        locs = np.array([param['loc'] for param in parameters])
+        scales = np.array([param['scale'] for param in parameters])
+        
+        mean_prediction = np.mean(locs, axis=0)
+
+        # Initialize optional values
+        aleatoric_uncertainty = None
+        epistemic_uncertainty = None
+        aleatoric_uncertainty_lower_bound = None
+        aleatoric_uncertainty_upper_bound = None
+
+        match mode:
+            case 'bayesian_mean':
+                aleatoric_uncertainty = np.mean(scales, axis=0)
+                epistemic_uncertainty = np.var(locs, axis=0)
+
+            case 'levi_simple':
+                aleatoric_uncertainty_lower_bound = np.min(scales, axis=0)
+                aleatoric_uncertainty_upper_bound = np.max(scales, axis=0)
+
+                pairwise_diff = locs[:, None, :] - locs[None, :, :]
+                epistemic_uncertainty = np.max(np.abs(pairwise_diff), axis=(0, 1))
+
+            case 'bayesian_kl':
+                log_scales_squared = np.log(scales ** 2)
+                aleatoric_uncertainty = 0.5 * (1 + np.log(2 * np.pi) + np.mean(log_scales_squared, axis=0))
+
+                mean_mu = np.mean(locs, axis=0)
+                mean_sigma = np.mean(scales, axis=0)
+                log_mean_sigma = np.log(mean_sigma ** 2)
+
+                mean_mu_deviation = np.mean((locs ** 2 - mean_mu ** 2), axis=0) / (mean_sigma ** 2)
+                epistemic_uncertainty = 0.5 * (log_mean_sigma - np.mean(log_scales_squared, axis=0) + mean_mu_deviation)
+
+            case 'levi_kl':
+                entropies = 0.5 * np.log(2 * np.pi * np.e * scales ** 2)
+                aleatoric_uncertainty_lower_bound = np.min(entropies, axis=0)
+                aleatoric_uncertainty_upper_bound = np.max(entropies, axis=0)
+
+                divergences = []
+                for p in parameters:
+                    for q in parameters:
+                        kl = (
+                            np.log(q['scale']) - np.log(p['scale']) +
+                            (p['scale'] ** 2 + (p['loc'] - q['loc']) ** 2) / (2 * q['scale'] ** 2) - 0.5
+                        )
+                        divergences.append(kl)
+                divergences = np.array(divergences)
+                epistemic_uncertainty = np.max(divergences, axis=0)
+
+            case _:
+                raise ValueError(f"Unknown uncertainty mode: '{mode}'")
+
+        return {
+            'mean': mean_prediction,
+            'predictive': (
+                aleatoric_uncertainty + epistemic_uncertainty
+                if aleatoric_uncertainty is not None else None
+            ),
+            'predictive_upper_bound': (
+                aleatoric_uncertainty_upper_bound + epistemic_uncertainty
+                if aleatoric_uncertainty_upper_bound is not None else None
+            ),
+            'predictive_lower_bound': (
+                aleatoric_uncertainty_lower_bound + epistemic_uncertainty
+                if aleatoric_uncertainty_lower_bound is not None else None
+            ),
+            'aleatoric': aleatoric_uncertainty,
+            'epistemic': epistemic_uncertainty,
+            'aleatoric_lower_bound': aleatoric_uncertainty_lower_bound,
+            'aleatoric_upper_bound': aleatoric_uncertainty_upper_bound,
+        }
 
     def fit(self, X, y, X_val=None, y_val=None, **kwargs):
         """
@@ -285,7 +391,7 @@ class NGBRegressor(NGBoost, BaseEstimator):
             case "ensemble_SGLB":
                 # - Tests - #
                 assert self.SGLB == True, "SGLB must be True for ensemble SGLB method."
-                assert self.n_estimators > 1, "n_estimators must be greater than 1 for ensemble SGLB method."
+                assert self.n_regressors > 1, "n_regressors must be greater than 1 for ensemble SGLB method."
                 # --------- #
 
                 ### TODO ###
@@ -308,7 +414,7 @@ class NGBRegressor(NGBoost, BaseEstimator):
             case "virtual_SGLB":
                 # - Tests - #
                 assert self.SGLB == True, "SGLB must be True for virtual SGLB method."
-                assert self.n_estimators > 1, "n_estimators must be greater than 1 for virtual SGLB method."
+                assert self.n_regressors > 1, "n_regressors must be greater than 1 for virtual SGLB method."
                 # --------- #
 
                 model = NGBoost(
@@ -320,7 +426,8 @@ class NGBRegressor(NGBoost, BaseEstimator):
             # --- Stochastic Gradient Boosting (SGB) - see <INSERT PAPER LINK> --- #
             case "SGB":
                 # - Tests - #
-                assert self.n_estimators > 1, "n_estimators must be greater than 1 for ensemble SGLB method."
+                assert self.n_regressors > 1, "n_regressors must be greater than 1 for ensemble SGLB method."
+                assert self.minibatch_frac < 1.0 or self.col_sample < 1.0, "minibatch_frac or col_sample must be less than 1 for SGB ensemble method."
                 # --------- #
 
                 ### TODO ###
@@ -358,8 +465,8 @@ class NGBRegressor(NGBoost, BaseEstimator):
             # --- Building an ensemble using bootstrap aggregation (bagging) - see <INSERT PAPER LINK> --- #
             case "bagging":
                 # - Tests - #
-                assert self.n_estimators > 1, "n_estimators must be greater than 1 for bagging method."
-                assert self.bagging_frac > 0 & self.bagging_frac < 1, "bagging_frac must be greater than 0 and less than 1 for bagging method."
+                assert self.n_regressors > 1, "n_regressors must be greater than 1 for bagging method."
+                assert (self.bagging_frac > 0) & (self.bagging_frac < 1), "bagging_frac must be greater than 0 and less than 1 for bagging method."
                 # --------- #
 
                 ### TODO ###
@@ -384,6 +491,8 @@ class NGBRegressor(NGBoost, BaseEstimator):
                     self.ensemble_models.append(model)
             case _:
                 raise ValueError(f"Unknown metadistribution method: {self.metadistribution_method}")
+            
+            
 
     def _core_ngboost_params(self, seed: int = None):
         params = {
