@@ -377,6 +377,11 @@ class NGBRegressor(NGBoost, BaseEstimator):
         Output:
             self : returns a fitted NGBRegressor object
         """
+        # - Random seeds - #
+        rng = np.random.default_rng(self.random_state)
+        seeds = rng.integers(0, 2**31 - 1, size=self.n_regressors)
+        # ---------------- #
+
         match self.metadistribution_method:
             
             # --- Standard NGBoostRegressor - see https://arxiv.org/pdf/1910.03225 --- #
@@ -394,19 +399,22 @@ class NGBRegressor(NGBoost, BaseEstimator):
                 assert self.n_regressors > 1, "n_regressors must be greater than 1 for ensemble SGLB method."
                 # --------- #
 
-                ### TODO ###
-                # - Build carefull logic for the random seed (has to be different for each regressor)
-                # - Enable to combine ensemble SGLB with bagging
-                ### TODO ###
-
                 for i in range(self.n_regressors):
                     if self.verbose:
                         print(f"\n Fitting regressor [{i+1}/{self.n_regressors}]")
 
-                    model = NGBoost(
-                        **self._core_ngboost_params(seed=i)
+                    # Optionally combine with bagging
+                    X_resampled, y_resampled = resample(
+                        X, y,
+                        replace=False,  
+                        n_samples=int(len(X) * self.bagging_frac), 
+                        random_state=seeds[i]  
                     )
-                    model.fit(X, y, **kwargs)
+
+                    model = NGBoost(
+                        **self._core_ngboost_params(seed=seeds[i])
+                    )
+                    model.fit(X_resampled, y_resampled, **kwargs)
                     self.ensemble_models.append(model)
 
 
@@ -430,19 +438,23 @@ class NGBRegressor(NGBoost, BaseEstimator):
                 assert self.minibatch_frac < 1.0 or self.col_sample < 1.0, "minibatch_frac or col_sample must be less than 1 for SGB ensemble method."
                 # --------- #
 
-                ### TODO ###
-                # - Build carefull logic for the random seed (has to be different for each regressor)
-                # - Enable to combine SGB with bagging
-                ### TODO ###
 
-                for i in range(self.n_regressors):
+                for i in range(self.n_regressors):            
+                    # Optionally combine with bagging
+                    X_resampled, y_resampled = resample(
+                        X, y,
+                        replace=False,  
+                        n_samples=int(len(X) * self.bagging_frac), 
+                        random_state=seeds[i]  
+                    )
+
                     if self.verbose:
                         print(f"\n Fitting regressor [{i+1}/{self.n_regressors}]")
 
                     model = NGBoost(
-                        **self._core_ngboost_params(seed=i)
+                        **self._core_ngboost_params(seed=seeds[i])
                     )
-                    model.fit(X, y, **kwargs)
+                    model.fit(X_resampled, y_resampled, **kwargs)
                     self.ensemble_models.append(model)
 
 
@@ -469,23 +481,20 @@ class NGBRegressor(NGBoost, BaseEstimator):
                 assert (self.bagging_frac > 0) & (self.bagging_frac < 1), "bagging_frac must be greater than 0 and less than 1 for bagging method."
                 # --------- #
 
-                ### TODO ###
-                ### Build carefull logic for the random seed (has to be different for each regressor)
-                ### TODO ###
-
                 for i in range(self.n_regressors):
                     if self.verbose:
                         print(f"\n Fitting regressor [{i+1}/{self.n_regressors}]")
 
-                    # Use a subsample of the data for bagging
+                    # Optionally combine with bagging
                     X_resampled, y_resampled = resample(
                         X, y,
-                        replace=False,  # subsample without replacement
-                        n_samples=int(len(X) * self.bagging_frac),  # fraction of data
-                        random_state=self.random_state
+                        replace=False,  
+                        n_samples=int(len(X) * self.bagging_frac), 
+                        random_state=seeds[i]  
                     )
+
                     model = NGBoost(
-                        **self._core_ngboost_params(seed=i)
+                        **self._core_ngboost_params(seed=seeds[i])
                     )
                     model.fit(X_resampled, y_resampled, **kwargs)
                     self.ensemble_models.append(model)
