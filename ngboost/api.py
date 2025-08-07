@@ -24,6 +24,7 @@ from ngboost.learners import default_tree_learner
 from ngboost.manifold import manifold
 from .ngboost_core import NGBoost
 from ngboost.scores import LogScore
+from .distns.utils import epistemic_scaling
 
 
 class NGBRegressor(NGBoost, BaseEstimator):
@@ -280,9 +281,9 @@ class NGBRegressor(NGBoost, BaseEstimator):
         if self.metadistribution_method == 'evidential_regression':
             dist = self.pred_dist(X)
             if hasattr(self.Dist, "pred_uncertainty") and getattr(dist, "is_EDL", False):
+                if getattr(dist, "epistemic_scaling", None):
+                    return epistemic_scaling(dist, knn=10)
                 return dist.pred_uncertainty()
-            elif getattr(dist, "epistemic_scaling", None):
-                return dist.epistemic_scaling(dist, knn=10)
             else:
                 raise NotImplementedError(
                     "The distribution does not implement a compatible pred_uncertainty method."

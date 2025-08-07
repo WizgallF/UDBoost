@@ -1,5 +1,6 @@
 # --- Local imports --- # 
 # - NGBoost - #
+from sklearn.linear_model import LinearRegression
 from ngboost import NGBRegressor
 from ngboost import NGBEnsembleRegressor
 from ngboost.distns import (
@@ -16,6 +17,7 @@ from sklearn.datasets import load_diabetes
 from sklearn.model_selection import train_test_split
 from scipy.stats import pearsonr
 import matplotlib.pyplot as plt
+from castle.datasets.simulator import IIDSimulation
 
 # --- External imports --- #
 # - Numpy import - #
@@ -58,11 +60,13 @@ dataset.y = z
 regressor = NGBRegressor(
     Dist=NormalInverseGamma,
     Score=NIGLogScore,
-    n_estimators=200,
+    n_estimators=500,
     learning_rate=0.1,
+    max_depth=4,
+    alpha=0.001,
     verbose=True,
     natural_gradient=True,
-    epistemic_scaling=False, 
+    epistemic_scaling=True, 
     metadistribution_method="evidential_regression"   # Enable epistemic scaling
 )
     
@@ -79,34 +83,50 @@ benchmark.benchmark_uncertainty(dataset, uncertainty_levi)
 # 1. Sample a random DAG
 d = 10                       # total number of variables
 exp_edges = 2                # expected parents per node
-dag = DAG.erdos_renyi(d, exp_edges)
-W = dag.weighted_adj        # weighted adjacency matrix
+W = DAG.erdos_renyi(d, exp_edges)      # weighted adjacency matrix
 
 # 2. Use the built-in IID simulator to get a continuous dataset
 #    – n: number of samples
 #    – func: "linear" (default) means Xj = ∑ W_ij · Xi + ε_j
 #    – scale: noise standard deviation
-X = simulator.simulate_iid(
-    W=W,
-    n=5000,
-    func="linear",
-    scale=0.5
+sim = IIDSimulation(
+    W=W,                # your weighted adjacency matrix
+    n=500,             # number of samples
+    method='linear',    # 'linear' or 'nonlinear'
+    sem_type='gauss',   # noise type: 'gauss', 'exp', 'gumbel', etc.
+    noise_scale=0.5     # noise standard deviation
 )
 
+X = sim.X  # shape (5000, d)
 # 3. Split into regression features & label
-target_idx = 0              # choose node‐0 as your “y”
+child_nodes = np.where(W.sum(axis=0) != 0)[0]
+print("nodes with ≥1 parent:", child_nodes)
+if len(child_nodes)==0:
+    raise RuntimeError("Your random graph had no edges!")
+    
+# Pick the last such node
+target_idx = child_nodes[-1]
+print("→ using target_idx =", target_idx, "with parents", np.where(W[:,target_idx]!=0)[0])
+# choose node‐(d-1) as your “y”
 y = X[:, target_idx]        # continuous target
 X_features = np.delete(X, target_idx, axis=1)
 
 X_train, X_test, y_train, y_test = train_test_split(
     X_features, y, test_size=0.1, random_state=42
 )
+
+lr = LinearRegression().fit(X_features, y)
+y_pred_lr = lr.predict(X_features)
+r_lr, _ = pearsonr(y_pred_lr, y)
+print(f"LinearRegression r² ~ {r_lr**2:.3f},  Pearson r = {r_lr:.3f}")
 # 4) Fit your NGBoost on the *scaled* targets
 ngb_diab = NGBRegressor(
     Dist=NormalInverseGamma, 
-    Score=NIGLogScore,
-    n_estimators=500,
-    learning_rate=0.01,
+    Score=NIGLogScoreSVGD,
+    n_estimators=400,
+    max_depth=4,
+    natural_gradient=True,
+    learning_rate=0.1,
     verbose=False,
     metadistribution_method="evidential_regression"    
 )

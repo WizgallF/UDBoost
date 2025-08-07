@@ -166,7 +166,7 @@ def epistemic_scaling(Dist, knn=10):
 
         # 1) leaf‐volume weight
         p_hat = leaf_volume_density_vec(tree, X_test)
-        w_vol = np.log(p_hat + eps) * 0.1
+        w_vol = p_hat * aleatoric
 
         # Find k nearest neighbors of each X_test in X_train
         k = min(knn, X_train.shape[0])  # choose k, e.g., 10 or less if not enough samples
@@ -181,10 +181,10 @@ def epistemic_scaling(Dist, knn=10):
         # which for 1‐D is just (diffs[:,0]**2 / aleatoric)
         m2 = np.einsum('ij,i->i', diffs**2, 1.0/(aleatoric + eps))
 
-        w_maha = np.sqrt(np.exp(-10 * m2) )            # (n_test,)
+        w_maha = (np.exp(-5 * m2) )          # (n_test,)
 
         # 3) combine
-        w_comb = w_vol * w_maha
+        w_comb = w_vol + w_maha
         
         scaled_uncertainties = {
             "epistemic": w_comb * epistemic,
