@@ -60,7 +60,7 @@ def calculate_catboost_uncertainty(dataset, n_models=20, iterations=200):
 
 # - Aleatoric Benchmark Data - #
 dataset = SyntheticDataGenerator.gen_1d_synthetic_benchmark(
-    n_samples=1000,
+    n_samples=500,
     noise_levels=[0.2, 0.2, 2, 1, 0.8],
     data_densities=[0.2, 0.2, 0.3, 0.4, 0.1],
     random_seed=42,
@@ -84,15 +84,15 @@ dataset.plot_1d_syn_benchmark(show=False)
 base_regressor = NGBRegressor(
     metadistribution_method='None',
     SGLB=False,
-    verbose=False  # Reduce logging output
+    verbose=False,  # Reduce logging output
 )
 
 # Define hyperparameter search space
 param_dist = {
-    'n_estimators': [100, 200, 300, 500, 1000],
+    'n_estimators': [100, 200, 300],
     'min_samples_leaf': [2, 5, 10, 20],
     'max_depth': [2, 3, 4, 5],
-    'learning_rate': [0.005, 0.01, 0.05, 0.1],
+    'learning_rate': [0.005, 0.01],
     'min_impurity_decrease': [0.0, 0.01, 0.1],
 }
 
@@ -102,7 +102,7 @@ random_search = RandomizedSearchCV(
     param_distributions=param_dist,
     n_iter=10,
     scoring='neg_mean_squared_error',
-    cv=3,
+    cv=5,
     verbose=1,
     n_jobs=-1,
     random_state=42
@@ -115,7 +115,7 @@ best_params = random_search.best_params_
 print("Best parameters found: ", best_params)
 
 # Fit an ensemble using best parameters
-ensemble_model = NGBRegressor(metadistribution_method='bagging', n_regressors=10, **best_params, bagging_frac=0.75, verbose=False)
+ensemble_model = NGBRegressor(metadistribution_method='ensemble_SGLB', n_regressors=10, **best_params, bagging_frac=0.75, SGLB=True, verbose=False)
 ensemble_model.fit(dataset.X.reshape(-1, 1), dataset.y)
 
 # Use ensemble_model as best_model for further evaluation
