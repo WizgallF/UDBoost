@@ -529,8 +529,9 @@ class NGBoost:
 
             D = self.Manifold(P_batch.T)
             # 'Set boosting counter for SVGD score to track iterations'
-            if self.Score is NIGLogScoreSVGD:
-                D.set_counter(itr)
+            
+            if D.is_EDL:
+                D.boosting_step = itr
             loss_list += [train_loss_monitor(D, Y_batch, weight_batch)]
             loss = loss_list[-1]
             grads = D.grad(Y_batch, natural=self.natural_gradient)
