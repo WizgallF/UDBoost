@@ -83,7 +83,6 @@ dataset.plot_1d_syn_benchmark(show=False)
 # Define base regressor with fixed parameters
 base_regressor = NGBRegressor(
     metadistribution_method='None',
-    SGLB=False,
     verbose=False,  # Reduce logging output
 )
 
@@ -91,7 +90,7 @@ base_regressor = NGBRegressor(
 param_dist = {
     'n_estimators': [100, 200, 300],
     'min_samples_leaf': [2, 5, 10, 20],
-    'max_depth': [2, 3, 4, 5],
+    'max_depth': [3],
     'learning_rate': [0.005, 0.01],
     'min_impurity_decrease': [0.0, 0.01, 0.1],
 }
@@ -115,7 +114,7 @@ best_params = random_search.best_params_
 print("Best parameters found: ", best_params)
 
 # Fit an ensemble using best parameters
-ensemble_model = NGBRegressor(metadistribution_method='ensemble_SGLB', n_regressors=10, **best_params, bagging_frac=0.75, SGLB=True, verbose=False)
+ensemble_model = NGBRegressor(metadistribution_method='bagging', n_regressors=10, **best_params, bagging_frac=0.75, SGLB=False, verbose=False)
 ensemble_model.fit(dataset.X.reshape(-1, 1), dataset.y)
 
 # Use ensemble_model as best_model for further evaluation
