@@ -4,6 +4,7 @@ import numpy as np
 # --- Within Lib --- #
 from utils.my_logging import Logging
 from utils.Types import UncertaintyDict
+from DatasetLoader import TabularDataLoader
 
 class UDBench:
     """Unified Benchmarking framework for uncertainty quantification models.
@@ -65,10 +66,9 @@ class UDBench:
 
             ```python
             {
-                "accuracy": 0.87,
-                "nll": 0.45,
-                "brier_score": 0.12,
-                "barplot": <plot object>
+                "mse": 0.87,
+                "r2": 0.45,
+                "scatterplot": <plot object>
             }
             ```
 
@@ -76,7 +76,36 @@ class UDBench:
             ValueError: If the predictions or uncertainty estimates are invalid or
                 incompatible.
         """
-        pass
+        # --- Load True Labels --- #
+        y_test_true = TabularDataLoader.load_labels(self.dataset_name)
+
+
+        # --- Compute Metrics --- #
+        mse = ((self.y_test_pred - y_test_true) ** 2).mean()
+        r2 = 1 - (mse / ((y_test_true - y_test_true.mean()) ** 2).mean())
+
+        # --- Report Results --- #
+        results = {"mse": mse, "r2": r2}
+        self.logger.performance_report(mse, r2)
+
+        # --- Generate Plots if Required --- #
+        if plot:
+            # TODO: Implement plotting
+            pass
+        else:
+            pass
+
+        return results
+
+    def calibration(self, plot: bool = False, verbose: int = 1) -> dict:
+        """Assess the calibration of the model's uncertainty estimates.
+
+        # --- Generate Plots if Required --- #
+        if plot:
+            # TODO: Implement plotting
+            pass
+        else:
+            pass
 
     def calibration(self, plot: bool = False, verbose: int = 1) -> dict:
         """Assess the calibration of the model's uncertainty estimates.

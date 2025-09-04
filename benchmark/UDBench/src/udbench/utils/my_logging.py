@@ -45,3 +45,16 @@ class Logging:
         Retrieve the configured logger.
         """
         return self.logger
+    
+    def performance_report(self, mse, r2):
+        """
+        Log a performance report with key metrics.
+        """
+        msg = (
+            "\n📊 Regression Report\n"
+            "-------------------------\n"
+            f"MSE: {mse:.4f}\n"
+            f"R² : {r2:.4f}\n"
+            "-------------------------"
+        )
+        self.logger.info(msg)
