@@ -12,36 +12,38 @@ class UDBench:
     and their uncertainty estimates. It supports both deterministic and
     probabilistic predictions, enabling consistent comparison across different
     model types.
-
-    Attributes:
-        predict (callable): A function or method that generates predictions
-            given input data.
-        predict_uncertainty (callable): A function or method that generates
-            uncertainty estimates for the given input data.
     """
 
     def __init__(
         self,
-        predict: Callable[[np.array], np.array],
-        predict_uncertainty: Callable[[np.array], UncertaintyDict]
+        y_test_pred: np.array = None,
+        y_test_predictive_uncertainty: np.array = None,
+        y_test_aleatoric_uncertainty: np.array = None,
+        y_test_epistemic_uncertainty: np.array = None,
+        dataset_name: str = None,
     ):
         """Initialize the UDBench object.
 
         Args:
-            predict: Callable function that generates predictions given input data.
-                Must accept input data (e.g., numpy arrays, pandas DataFrames) and
-                return predictions in a compatible format.
-            predict_uncertainty: Callable function that generates uncertainty
-                estimates for input data. Must return uncertainties aligned with the
-                predictions from ``predict``.
+            y_test_pred (np.array): Predictions for the test set.
+            y_test_predictive_uncertainty (np.array, optional): Predictive uncertainty estimates for the test set.
+            y_test_aleatoric_uncertainty (np.array, optional): Aleatoric uncertainty estimates for the test set.
+            y_test_epistemic_uncertainty (np.array, optional): Epistemic uncertainty estimates for the test set.
+            dataset_name (str): Name of the dataset being evaluated.
         """
-        # --- Functions --- #
-        self.predict = predict
-        self.predict_uncertainty = predict_uncertainty
+        # --- PREDICTIONS --- #
+        self.y_test_pred = y_test_pred
 
+        # --- UNCERTAINTY ESTIMATES --- #
+        self.y_test_predictive_uncertainty = y_test_predictive_uncertainty
+        self.y_test_aleatoric_uncertainty = y_test_aleatoric_uncertainty
+        self.y_test_epistemic_uncertainty = y_test_epistemic_uncertainty
+
+        # --- DATASET INFO --- #
+        self.dataset_name = dataset_name
+      
         # --- LOGGING --- #
         self.logger = Logging('log').get_logger()
-
 
 
     def predictive_performance(self, plot: bool = False, verbose: int = 1) -> dict:
