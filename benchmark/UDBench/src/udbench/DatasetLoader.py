@@ -6,7 +6,12 @@ import pandas as pd
 from sklearn.datasets import fetch_openml
 from sklearn.preprocessing import LabelEncoder
 from sklearn.utils import check_random_state
-
+import io, zipfile, requests
+from urllib.parse import quote
+try:
+    from ucimlrepo import fetch_ucirepo
+except Exception:
+    fetch_ucirepo = None
 
 class TabularDataLoader:
     """
@@ -91,101 +96,180 @@ class TabularDataLoader:
             return df.iloc[idx].reset_index(drop=True)
         return df
 
+    @staticmethod
+    def _uci_df_by_id(uci_id: int) -> pd.DataFrame:
+        ds = fetch_ucirepo(id=uci_id)  # e.g., 294 = CCPP
+        df = getattr(ds.data, "original", None)
+        if df is None or df.empty:
+            parts = []
+            for attr in ("ids", "features", "targets"):
+                part = getattr(ds.data, attr, None)
+                if part is not None and not part.empty:
+                    parts.append(part)
+            df = pd.concat(parts, axis=1)
+        df.attrs["name"] = ds.metadata.name
+        return df
+
+    @staticmethod
+    def _uci_df_by_name(name: str) -> pd.DataFrame:
+        ds = fetch_ucirepo(name=name)
+        df = getattr(ds.data, "original", None)
+        if df is None or df.empty:
+            parts = []
+            for attr in ("ids", "features", "targets"):
+                part = getattr(ds.data, attr, None)
+                if part is not None and not part.empty:
+                    parts.append(part)
+            df = pd.concat(parts, axis=1)
+        df.attrs["name"] = ds.metadata.name
+        return df
     # ---------- dataset loaders ----------
 
     def _load_concrete(self, row_cap: Optional[int]) -> Dict:
-        ds = self._fetch_openml_any([
-            "Concrete Compressive Strength", "concrete"
-        ], as_frame=True)
-        df = ds.frame.copy()
+        # UCI: "Concrete Compressive Strength" (Excel .xls on UCI)
+        # Requires `xlrd` for .xls parsing.
+        df = self._uci_df_by_name("Concrete Compressive Strength")  # stable UCI name
         df = self._apply_row_cap(df, row_cap, np.random.default_rng(0))
         X, y, feat, tgt = self._finalize_Xy_numeric_auto(
-            df,
-            target_candidates=[
-                "Concrete compressive strength",  # common
-                "csMPa", "ccs", "CompressiveStrength", "concrete_strength", "strength", ds.target_names[0] if ds.target_names else ""
+            df, target_candidates=[
+                "Concrete compressive strength", "csMPa", "CompressiveStrength"
             ]
         )
         return {"X": X, "y": y.astype(float), "feature_names": feat, "target_name": tgt}
 
     def _load_wine_quality(self, which: str, row_cap: Optional[int]) -> Dict:
-        name = f"wine-quality-{which}"
-        ds = fetch_openml(name=name, as_frame=True, cache=True, parser="auto")
-        df = ds.frame.copy()
+        base = "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/"
+        url = base + ( "winequality-red.csv" if which == "red" else "winequality-white.csv" )
+        df = pd.read_csv(url, sep=";")
+        df.attrs["name"] = f"WineQuality-{which.capitalize()} (UCI)"
         df = self._apply_row_cap(df, row_cap, np.random.default_rng(0))
         X, y, feat, tgt = self._finalize_Xy_numeric_auto(df, target_candidates=["quality"])
         return {"X": X, "y": y.astype(float), "feature_names": feat, "target_name": tgt}
 
     def _load_naval(self, row_cap: Optional[int]) -> Dict:
-        ds = self._fetch_openml_any([
-            "naval-propulsion-plant", "naval-propulsion", "Naval Propulsion Plant"
-        ], as_frame=True)
-        df = ds.frame.copy()
+        # Prefer ucimlrepo if your version supports this dataset
+        if fetch_ucirepo is not None:
+            try:
+                ds = fetch_ucirepo(id=316)  # UCI: Condition Based Maintenance of Naval Propulsion Plants
+                X = ds.data.features.copy()
+                y_df = ds.data.targets.copy()
+
+                # Prefer turbine, then compressor
+                preferred = [
+                    "GT Turbine decay state coefficient",
+                    "GT Compressor decay state coefficient",
+                ]
+                y_col = next((c for c in preferred if c in y_df.columns), None)
+                if y_col is None:
+                    # fallback to metadata or first target
+                    meta_tgt = getattr(ds.metadata, "target_col", None)
+                    if isinstance(meta_tgt, (list, tuple)) and meta_tgt:
+                        y_col = meta_tgt[0]
+                    elif isinstance(meta_tgt, str):
+                        y_col = meta_tgt
+                    else:
+                        y_col = y_df.columns[-1]
+
+                # numeric-only features and joint NA filter
+                X_num = X.select_dtypes(include=[np.number]).copy()
+                y_series = y_df[y_col].astype(float)
+
+                df_all = pd.concat([X_num, y_series.rename(y_col)], axis=1)
+
+                # optional subsample prior to NA drop
+                if row_cap is not None and len(df_all) > row_cap:
+                    idx = np.random.default_rng(0).choice(len(df_all), size=row_cap, replace=False)
+                    df_all = df_all.iloc[idx].reset_index(drop=True)
+
+                keep = ~df_all.drop(columns=[y_col]).isna().any(axis=1) & ~df_all[y_col].isna()
+                df_all = df_all.loc[keep]
+
+                X_out = df_all.drop(columns=[y_col]).to_numpy()
+                y_out = df_all[y_col].to_numpy(dtype=float)
+                feat_names = list(df_all.drop(columns=[y_col]).columns)
+                return {"X": X_out, "y": y_out, "feature_names": feat_names, "target_name": y_col}
+            except Exception as e:
+                # Falls through to ZIP loader if this dataset isn't import-enabled yet.
+                if "not available for import" not in str(e).lower():
+                    raise
+
+        # --- Fallback: download official UCI ZIP and parse data.txt ---
+        import io, zipfile, requests
+        zip_url = "https://archive.ics.uci.edu/static/public/316/condition%2Bbased%2Bmaintenance%2Bof%2Bnaval%2Bpropulsion%2Bplants.zip"
+        r = requests.get(zip_url, timeout=120)
+        r.raise_for_status()
+        with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+            member = next((n for n in zf.namelist() if n.lower().endswith("data.txt")), None)
+            if member is None:
+                raise RuntimeError("Naval zip: data.txt not found in archive")
+            with zf.open(member) as fh:
+                df = pd.read_csv(fh, sep=r"\s+", header=None, engine="python")
+
+        # 16 GT sensor features + 2 decay coefficients (targets) as per UCI page
+        cols = [
+            "lp","v","GTT","GTn","GGn","Ts","Tp","T48","T1","T2","P48","P1","P2","Pexh","TIC","mf",
+            "GT Compressor decay state coefficient","GT Turbine decay state coefficient"
+        ]
+        if df.shape[1] == len(cols):
+            df.columns = cols
+        df.attrs["name"] = "Naval CBM (UCI)"
+
         df = self._apply_row_cap(df, row_cap, np.random.default_rng(0))
-        # Typical targets (two decay coefficients). Pick turbine by default if present.
+
         X, y, feat, tgt = self._finalize_Xy_numeric_auto(
             df,
             target_candidates=[
-                "GT Turbine decay state coefficient",         # common
+                "GT Turbine decay state coefficient",
                 "GT Compressor decay state coefficient",
-                "turbine", "compressor", ds.target_names[0] if ds.target_names else ""
-            ]
+            ],
         )
         return {"X": X, "y": y.astype(float), "feature_names": feat, "target_name": tgt}
 
     def _load_protein(self, row_cap: Optional[int]) -> Dict:
-        # Often published as CASP / “Physicochemical Properties of Protein Tertiary Structure”
-        ds = self._fetch_openml_any([
-            "CASP", "Physicochemical Properties of Protein Tertiary Structure", "protein"
-        ], as_frame=True)
-        df = ds.frame.copy()
+        # UCI CASP.csv
+        url = "https://archive.ics.uci.edu/ml/machine-learning-databases/00265/CASP.csv"
+        df = pd.read_csv(url)
+        df.attrs["name"] = "CASP / Protein (UCI)"
         df = self._apply_row_cap(df, row_cap, np.random.default_rng(0))
-        X, y, feat, tgt = self._finalize_Xy_numeric_auto(
-            df,
-            target_candidates=["RMSD", ds.target_names[0] if ds.target_names else ""]
-        )
+        X, y, feat, tgt = self._finalize_Xy_numeric_auto(df, target_candidates=["RMSD"])
         return {"X": X, "y": y.astype(float), "feature_names": feat, "target_name": tgt}
 
     def _load_year_msd(self, row_cap: Optional[int]) -> Dict:
-        ds = fetch_openml(name="YearPredictionMSD", as_frame=True, cache=True, parser="auto")
-        df = ds.frame.copy()
+        # Download once and read from zip in-memory (UCI provides a zip)
+        url = "https://archive.ics.uci.edu/ml/machine-learning-databases/00203/YearPredictionMSD.txt.zip"
+        r = requests.get(url, timeout=120); r.raise_for_status()
+        with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+            with zf.open("YearPredictionMSD.txt") as fh:
+                df = pd.read_csv(fh, header=None)
+        # name the columns: first is year (target), 90 features
+        df.columns = ["year"] + [f"x{i}" for i in range(1, df.shape[1])]
+        df.attrs["name"] = "YearPredictionMSD (UCI)"
         df = self._apply_row_cap(df, row_cap, np.random.default_rng(0))
-        X, y, feat, tgt = self._finalize_Xy_numeric_auto(df, target_candidates=["year", ds.target_names[0] if ds.target_names else ""])
+        X, y, feat, tgt = self._finalize_Xy_numeric_auto(df, target_candidates=["year"])
         return {"X": X, "y": y.astype(float), "feature_names": feat, "target_name": tgt}
 
     def _load_power(self, row_cap: Optional[int]) -> Dict:
-        # Combined Cycle Power Plant (CCPP)
-        ds = self._fetch_openml_any([
-            "Combined Cycle Power Plant", "CCPP", "power-plant"
-        ], as_frame=True)
-        df = ds.frame.copy()
+        # UCI ID: 294 (Combined Cycle Power Plant)
+        df = self._uci_df_by_id(294)
         df = self._apply_row_cap(df, row_cap, np.random.default_rng(0))
         X, y, feat, tgt = self._finalize_Xy_numeric_auto(
-            df,
-            target_candidates=["PE", "Net hourly electrical energy output (PE)", ds.target_names[0] if ds.target_names else ""]
+            df, target_candidates=["PE", "Net hourly electrical energy output (PE)"]
         )
         return {"X": X, "y": y.astype(float), "feature_names": feat, "target_name": tgt}
 
     def _load_yacht(self, row_cap: Optional[int]) -> Dict:
-        ds = self._fetch_openml_any([
-            "yacht", "Yacht Hydrodynamics", "yacht_hydrodynamics"
-        ], as_frame=True)
-        df = ds.frame.copy()
+        url = "https://archive.ics.uci.edu/ml/machine-learning-databases/00243/yacht_hydrodynamics.data"
+        df = pd.read_csv(url, sep=r"\s+", header=None, engine="python")
+        df.columns = [
+            "LongPos_COB","Prismatic_Coeff","Length_Displacement_Ratio",
+            "Beam_Draught_Ratio","Length_Beam_Ratio","Froude_Number",
+            "Residuary_resistance"
+        ]
+        df.attrs["name"] = "Yacht (UCI)"
         df = self._apply_row_cap(df, row_cap, np.random.default_rng(0))
         X, y, feat, tgt = self._finalize_Xy_numeric_auto(
-            df,
-            target_candidates=[
-                "residuary resistance", "Rr", ds.target_names[0] if ds.target_names else ""
-            ]
+            df, target_candidates=["Residuary_resistance","residuary resistance","Rr"]
         )
-        return {"X": X, "y": y.astype(float), "feature_names": feat, "target_name": tgt}
-
-    def _load_boston(self, row_cap: Optional[int]) -> Dict:
-        # Research only; deprecated in sklearn, but available on OpenML.
-        ds = self._fetch_openml_any(["boston", "Boston"], as_frame=True)
-        df = ds.frame.copy()
-        df = self._apply_row_cap(df, row_cap, np.random.default_rng(0))
-        X, y, feat, tgt = self._finalize_Xy_numeric_auto(df, target_candidates=["MEDV", "medv", ds.target_names[0] if ds.target_names else ""])
         return {"X": X, "y": y.astype(float), "feature_names": feat, "target_name": tgt}
 
     def _load_shifts_placeholder(self, row_cap: Optional[int]) -> Dict:
@@ -207,7 +291,6 @@ class TabularDataLoader:
         include_yearmsd: bool = True,
         include_power: bool = True,
         include_yacht: bool = True,
-        include_boston: bool = True,
         include_shifts: bool = False,  # off by default; needs external source
         row_cap: Optional[int] = 100_000,
     ) -> Dict[str, Dict]:
@@ -240,8 +323,6 @@ class TabularDataLoader:
             _add("Power", self._load_power, row_cap)
         if include_yacht:
             _add("Yacht", self._load_yacht, row_cap)
-        if include_boston:
-            _add("Boston", self._load_boston, row_cap)
         if include_shifts:
             _add("Shifts", self._load_shifts_placeholder, row_cap)
 
@@ -254,15 +335,14 @@ if __name__ == "__main__":
 
     loader = TabularDataLoader(random_state=42)
     data_dict = loader.load_tabular_data(
-        include_concrete=True,
-        include_wine_red=True,
+        include_concrete=False,
+        include_wine_red=False,
         include_wine_white=False,  # flip on for OOD swap experiments
         include_naval=True,
         include_protein=False,     # can be big; enable if you want
         include_yearmsd=False,     # large; enable if you want
-        include_power=True,
-        include_yacht=True,
-        include_boston=True,
+        include_power=False,
+        include_yacht=False,
         include_shifts=False,
         row_cap=100_000,
     )
