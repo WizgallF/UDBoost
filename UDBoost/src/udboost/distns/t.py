@@ -3,8 +3,8 @@ import numpy as np
 from scipy.special import digamma
 from scipy.stats import t as dist
 
-from ngboost.distns.distn import RegressionDistn
-from ngboost.scores import LogScore
+from .distn import RegressionDistn
+from ..scores import LogScore
 
 
 class TLogScore(LogScore):

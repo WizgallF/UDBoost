@@ -2,8 +2,8 @@
 import numpy as np
 from scipy.stats import halfnorm as dist
 
-from ngboost.distns.distn import RegressionDistn
-from ngboost.scores import LogScore
+from .distn import RegressionDistn
+from ..scores import LogScore
 
 
 class HalfNormalLogScore(LogScore):

@@ -1,6 +1,6 @@
 import numpy as np
-from ngboost.distns.distn import RegressionDistn
-from ngboost.scores import LogScore
+from .distn import RegressionDistn
+from ..scores import LogScore
 from scipy.special import gammaln, digamma, polygamma, psi
 import scipy.stats as st
 
@@ -11,7 +11,13 @@ from .nig_jit import (
 )
 from .utils import rbf_kernel_and_grad_numba, leaf_volume_density_vec
 
-import line_profiler
+try:
+    import line_profiler
+except Exception:
+    class _DummyProfiler:
+        def profile(self, fn):
+            return fn
+    line_profiler = _DummyProfiler()
 
 
 def softplus(x):

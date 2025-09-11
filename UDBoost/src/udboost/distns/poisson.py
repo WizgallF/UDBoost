@@ -3,8 +3,8 @@ import numpy as np
 from scipy.optimize import Bounds, minimize
 from scipy.stats import poisson as dist
 
-from ngboost.distns.distn import RegressionDistn
-from ngboost.scores import LogScore
+from .distn import RegressionDistn
+from ..scores import LogScore
 
 
 def negative_log_likelihood(params, data):

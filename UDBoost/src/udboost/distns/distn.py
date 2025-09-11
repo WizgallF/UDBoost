@@ -3,7 +3,7 @@ from warnings import warn
 
 import numpy as np
 
-from ngboost.helpers import Y_from_censored
+from ..helpers import Y_from_censored
 
 
 class Distn:

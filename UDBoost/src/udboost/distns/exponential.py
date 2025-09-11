@@ -3,8 +3,8 @@ import numpy as np
 import scipy as sp
 from scipy.stats import expon as dist
 
-from ngboost.distns.distn import RegressionDistn
-from ngboost.scores import CRPScore, LogScore
+from .distn import RegressionDistn
+from ..scores import CRPScore, LogScore
 
 eps = 1e-10
 

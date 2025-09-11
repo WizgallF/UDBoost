@@ -10,10 +10,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.utils import check_array, check_random_state, check_X_y
 
-from ngboost.distns import MultivariateNormal, Normal, k_categorical #, NIGLogScoreSVGD
-from ngboost.learners import default_tree_learner
-from ngboost.manifold import manifold
-from ngboost.scores import LogScore
+from .distns import MultivariateNormal, Normal, k_categorical  # , NIGLogScoreSVGD
+from .learners import default_tree_learner
+from .manifold import manifold
+from .scores import LogScore
 
 
 class NGBoost:

@@ -3,8 +3,8 @@ import numpy as np
 import scipy as sp
 from scipy.stats import gamma as dist
 
-from ngboost.distns.distn import RegressionDistn
-from ngboost.scores import LogScore
+from .distn import RegressionDistn
+from ..scores import LogScore
 
 
 class GammaLogScore(LogScore):

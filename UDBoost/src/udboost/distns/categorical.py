@@ -3,8 +3,8 @@
 import numpy as np
 import scipy as sp
 
-from ngboost.distns.distn import ClassificationDistn
-from ngboost.scores import CRPScore, LogScore
+from .distn import ClassificationDistn
+from ..scores import CRPScore, LogScore
 
 
 class CategoricalLogScore(LogScore):

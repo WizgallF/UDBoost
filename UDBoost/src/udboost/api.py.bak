@@ -11,7 +11,7 @@ from sklearn.utils import check_random_state
 import numpy as np
 
 # - NGBoost - #
-from .distns import (
+from ngboost.distns import (
     Bernoulli,
     ClassificationDistn,
     LogNormal,
@@ -19,12 +19,12 @@ from .distns import (
     NormalInverseGamma,
     RegressionDistn,
 )
-from .distns.utils import SurvivalDistnClass
-from .helpers import Y_from_censored
-from .learners import default_tree_learner
-from .manifold import manifold
+from ngboost.distns.utils import SurvivalDistnClass
+from ngboost.helpers import Y_from_censored
+from ngboost.learners import default_tree_learner
+from ngboost.manifold import manifold
 from .ngboost_core import NGBoost
-from .scores import LogScore
+from ngboost.scores import LogScore
 from .distns.utils import epistemic_scaling
 
 

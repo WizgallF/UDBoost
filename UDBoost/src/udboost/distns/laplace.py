@@ -2,8 +2,8 @@
 import numpy as np
 from scipy.stats import laplace as dist
 
-from ngboost.distns.distn import RegressionDistn
-from ngboost.scores import CRPScore, LogScore
+from .distn import RegressionDistn
+from ..scores import CRPScore, LogScore
 
 
 class LaplaceLogScore(LogScore):
