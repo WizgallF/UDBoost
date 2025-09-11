@@ -483,15 +483,15 @@ class NGBoost:
             self.X_train = X
         self.n_features = X.shape[1]
 
-         
+        # TODO: I outcommented this hook for now since it was causing issues ###############
         # --- HOOK #1: only enable leaf‐density when Score is exactly your SVGD class ---
-        if self.Score is NIGLogScoreSVGD:
-            self._needs_leaf_density = True
-            print("Enabling leaf‐density computation for SVGD score.")
-            self._X_for_leaf = X
-        else:
-            self._needs_leaf_density = False
-            self._X_for_leaf = None
+        #if self.Score is NIGLogScoreSVGD:
+        #    self._needs_leaf_density = True
+        #    print("Enabling leaf‐density computation for SVGD score.")
+        #    self._X_for_leaf = X
+        #else:
+        self._needs_leaf_density = False
+        self._X_for_leaf = None
 
         loss_list = []
         self.fit_init_params_to_marginal(Y)
